@@ -14,6 +14,26 @@ const soloPlayer: PlayerState = {
 };
 
 describe("GameSimulation solo debug", () => {
+  it.each([
+    ["easy", 1],
+    ["medium", 5],
+    ["hard", 10],
+  ] as const)("spawns %s difficulty with %i distinct enemies", (difficulty, count) => {
+    const simulation = new GameSimulation(
+      generateMaze(123, 71, 71),
+      [soloPlayer],
+      true,
+      difficulty,
+    );
+    expect(simulation.enemies).toHaveLength(count);
+    expect(
+      new Set(simulation.enemies.map((enemy) => `${enemy.position.x},${enemy.position.z}`)).size,
+    ).toBe(count);
+    simulation.update(1 / 20);
+    expect(simulation.phase).toBe("playing");
+    expect(simulation.enemies.every((enemy) => enemy.mode !== "stomped")).toBe(true);
+  });
+
   it("keeps a one-player debug match running", () => {
     const simulation = new GameSimulation(generateMaze(123), [soloPlayer], true);
     simulation.update(1 / 20);

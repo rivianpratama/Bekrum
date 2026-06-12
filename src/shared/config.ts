@@ -1,3 +1,5 @@
+import type { Difficulty } from "./types";
+
 export const GAME_CONFIG = {
   room: {
     minPlayers: 2,
@@ -91,5 +93,37 @@ export const MAP_SIZE_DIMENSIONS = {
   medium: 111,
   large: GAME_CONFIG.maze.width,
 } as const;
+
+export interface DifficultyProfile {
+  enemyCount: number;
+  roamIntensity: number;
+  searchPersistence: number;
+  chaseCommitment: number;
+  detectionPressure: number;
+}
+
+export const DIFFICULTY_PROFILES: Record<Difficulty, DifficultyProfile> = {
+  easy: {
+    enemyCount: 1,
+    roamIntensity: 1,
+    searchPersistence: 1,
+    chaseCommitment: 1,
+    detectionPressure: 1,
+  },
+  medium: {
+    enemyCount: 5,
+    roamIntensity: 1.35,
+    searchPersistence: 1.5,
+    chaseCommitment: 1.4,
+    detectionPressure: 1.25,
+  },
+  hard: {
+    enemyCount: 10,
+    roamIntensity: 1.75,
+    searchPersistence: 2,
+    chaseCommitment: 1.8,
+    detectionPressure: 1.5,
+  },
+};
 
 export type GameConfig = typeof GAME_CONFIG;

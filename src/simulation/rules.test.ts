@@ -25,6 +25,7 @@ describe("cooperation rules", () => {
 
   it("requires every living player to be in stomp range", () => {
     const enemy: EnemyState = {
+      id: "enemy-1",
       position: { x: 0, z: 0 },
       yaw: 0,
       scale: 0.3,

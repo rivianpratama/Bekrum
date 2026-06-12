@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import type { MapSize, PlayerState } from "../shared/types";
+import type { Difficulty, MapSize, PlayerState } from "../shared/types";
 
 interface LobbyProps {
   screen: "home" | "waiting";
@@ -10,6 +10,7 @@ interface LobbyProps {
   isHost: boolean;
   allowSoloDebug: boolean;
   mapSize: MapSize;
+  difficulty: Difficulty;
   busy: boolean;
   error: string;
   onName: (value: string) => void;
@@ -17,6 +18,7 @@ interface LobbyProps {
   onCreate: () => void;
   onJoin: () => void;
   onMapSize: (value: MapSize) => void;
+  onDifficulty: (value: Difficulty) => void;
   onStart: () => void;
 }
 
@@ -62,17 +64,30 @@ export function Lobby(props: LobbyProps) {
             ))}
           </div>
           {props.isHost ? (
-            <label className="map-size-field">
-              MAP SIZE
-              <select
-                value={props.mapSize}
-                onChange={(event) => props.onMapSize(event.target.value as MapSize)}
-              >
-                <option value="small">SMALL - 71 x 71</option>
-                <option value="medium">MEDIUM - 111 x 111</option>
-                <option value="large">LARGE - 151 x 151</option>
-              </select>
-            </label>
+            <div className="game-settings">
+              <label>
+                MAP SIZE
+                <select
+                  value={props.mapSize}
+                  onChange={(event) => props.onMapSize(event.target.value as MapSize)}
+                >
+                  <option value="small">SMALL - 71 x 71</option>
+                  <option value="medium">MEDIUM - 111 x 111</option>
+                  <option value="large">LARGE - 151 x 151</option>
+                </select>
+              </label>
+              <label>
+                DIFFICULTY
+                <select
+                  value={props.difficulty}
+                  onChange={(event) => props.onDifficulty(event.target.value as Difficulty)}
+                >
+                  <option value="easy">EASY - 1 ENTITY</option>
+                  <option value="medium">MEDIUM - 5 ENTITIES</option>
+                  <option value="hard">HARD - 10 ENTITIES</option>
+                </select>
+              </label>
+            </div>
           ) : null}
           <footer>
             <p>

@@ -4,6 +4,7 @@ export type RoomPhase = "lobby" | "loading" | "playing" | "won" | "lost";
 export type PlayerLife = "alive" | "downed" | "ghost";
 export type EnemyMode = "roam" | "investigate" | "search" | "chase" | "attack" | "stomped";
 export type MapSize = "small" | "medium" | "large";
+export type Difficulty = "easy" | "medium" | "hard";
 
 export interface MazeDescriptor {
   generatorVersion: "office-v3";
@@ -26,6 +27,7 @@ export interface PlayerState {
 }
 
 export interface EnemyState {
+  id: string;
   position: Vec2;
   yaw: number;
   scale: number;
@@ -40,7 +42,7 @@ export interface GameSnapshot {
   serverTime: number;
   phase: RoomPhase;
   players: PlayerState[];
-  enemy: EnemyState;
+  enemies: EnemyState[];
   proximityFactor: number;
   stompProgress: number;
 }

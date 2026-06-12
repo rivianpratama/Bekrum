@@ -12,8 +12,10 @@ export class GameRenderer {
   private readonly playerMeshes = new Map<string, THREE.Mesh>();
   private readonly playerTargets = new Map<string, THREE.Vector2>();
   private readonly cameraTarget = new THREE.Vector3();
-  private readonly enemyTarget = new THREE.Vector3();
-  private readonly enemyScaleTarget = new THREE.Vector3(1, 1, 1);
+  private readonly enemyTargets = new Map<string, THREE.Vector3>();
+  private readonly enemyScaleTargets = new Map<string, THREE.Vector3>();
+  private readonly enemyPositions = new Map<string, THREE.Vector3>();
+  private readonly enemyScales = new Map<string, number>();
   private readonly entityCameraTarget = new THREE.Vector3();
   private readonly entityLookTarget = new THREE.Vector3();
   private enemyVisual: EnemyVisual | null = null;
@@ -33,6 +35,7 @@ export class GameRenderer {
     private readonly canvas: HTMLCanvasElement,
     private readonly maze: Maze,
     private readonly localPlayerId: string,
+    private readonly enemyCount: number,
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(this.renderScale);
@@ -57,21 +60,23 @@ export class GameRenderer {
       if (this.camera.position.lengthSq() === 0) this.camera.position.copy(this.cameraTarget);
       this.setLook(local.yaw, pitch);
     }
-    const enemy = snapshot.enemy;
-    const forwardX = Math.sin(enemy.yaw);
-    const forwardZ = Math.cos(enemy.yaw);
-    const cameraDistance = 4.5 + enemy.scale;
-    this.enemyTarget.set(enemy.position.x, 0, enemy.position.z);
-    this.entityCameraTarget.set(
-      enemy.position.x - forwardX * cameraDistance,
-      2.35 + enemy.scale * 0.45,
-      enemy.position.z - forwardZ * cameraDistance,
-    );
-    this.entityLookTarget.set(
-      enemy.position.x + forwardX * 5,
-      1.15 * enemy.scale,
-      enemy.position.z + forwardZ * 5,
-    );
+    const trackedEnemy =
+      snapshot.enemies.find((enemy) => enemy.mode !== "stomped") ?? snapshot.enemies[0];
+    if (trackedEnemy) {
+      const forwardX = Math.sin(trackedEnemy.yaw);
+      const forwardZ = Math.cos(trackedEnemy.yaw);
+      const cameraDistance = 4.5 + trackedEnemy.scale;
+      this.entityCameraTarget.set(
+        trackedEnemy.position.x - forwardX * cameraDistance,
+        2.35 + trackedEnemy.scale * 0.45,
+        trackedEnemy.position.z - forwardZ * cameraDistance,
+      );
+      this.entityLookTarget.set(
+        trackedEnemy.position.x + forwardX * 5,
+        1.15 * trackedEnemy.scale,
+        trackedEnemy.position.z + forwardZ * 5,
+      );
+    }
     for (const player of snapshot.players) {
       if (player.id === this.localPlayerId || player.life === "ghost") continue;
       let mesh = this.playerMeshes.get(player.id);
@@ -94,12 +99,23 @@ export class GameRenderer {
       }
       mesh.visible = player.life === "alive";
     }
-    if (this.enemyVisual) {
-      const object = this.enemyVisual.object;
-      object.rotation.y = enemy.yaw;
-      const scale = enemy.scale;
-      this.enemyScaleTarget.set(scale, scale, scale);
-      object.visible = enemy.mode !== "stomped";
+    for (const enemy of snapshot.enemies) {
+      let target = this.enemyTargets.get(enemy.id);
+      if (!target) {
+        target = new THREE.Vector3(enemy.position.x, 0, enemy.position.z);
+        this.enemyTargets.set(enemy.id, target);
+        this.enemyPositions.set(enemy.id, target.clone());
+      } else {
+        target.set(enemy.position.x, 0, enemy.position.z);
+      }
+      let scaleTarget = this.enemyScaleTargets.get(enemy.id);
+      if (!scaleTarget) {
+        scaleTarget = new THREE.Vector3(enemy.scale, enemy.scale, enemy.scale);
+        this.enemyScaleTargets.set(enemy.id, scaleTarget);
+        this.enemyScales.set(enemy.id, enemy.scale);
+      } else {
+        scaleTarget.setScalar(enemy.scale);
+      }
     }
   }
 
@@ -130,26 +146,32 @@ export class GameRenderer {
     this.renderer.dispose();
   }
 
-  private async attachEnemy(): Promise<void> {
-    const visual = await loadEnemyVisual();
+  private async attachEnemies(): Promise<void> {
+    this.canvas.dataset.enemyCount = this.enemyCount.toString();
+    const visual = await loadEnemyVisual(this.enemyCount);
     if (this.disposed) {
       visual.dispose();
       return;
     }
     this.enemyVisual = visual;
-    this.canvas.dataset.enemyVisual = this.enemyVisual.usedFallback ? "fallback" : "splat";
-    if (this.targetSnapshot) {
-      const enemy = this.targetSnapshot.enemy;
-      this.enemyTarget.set(enemy.position.x, 0, enemy.position.z);
-      this.enemyVisual.object.position.copy(this.enemyTarget);
-      this.enemyScaleTarget.setScalar(enemy.scale);
-      this.enemyVisual.object.scale.copy(this.enemyScaleTarget);
-    }
-    this.scene.add(this.enemyVisual.object);
+    this.canvas.dataset.enemyVisual = visual.usedFallback ? "fallback" : "splat";
+    this.canvas.dataset.enemyFallbackCount = visual.usedFallback
+      ? this.enemyCount.toString()
+      : "0";
+    this.targetSnapshot?.enemies.forEach((enemy, index) => {
+      visual.setEnemy(
+        index,
+        enemy.position,
+        enemy.yaw,
+        enemy.scale,
+        enemy.mode !== "stomped",
+      );
+    });
+    this.scene.add(visual.object);
   }
 
   private async attachVisuals(): Promise<void> {
-    await this.attachEnemy();
+    await this.attachEnemies();
     if (!this.disposed) await this.attachClutter();
   }
 
@@ -454,11 +476,33 @@ export class GameRenderer {
       mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, target.x, smoothing);
       mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, target.y, smoothing);
     }
-    if (this.enemyVisual) {
-      this.enemyVisual.object.position.lerp(this.enemyTarget, smoothing);
-      this.enemyVisual.object.scale.lerp(this.enemyScaleTarget, smoothing);
+    if (this.enemyVisual && this.targetSnapshot) {
+      this.targetSnapshot.enemies.forEach((enemy, index) => {
+        const target = this.enemyTargets.get(enemy.id);
+        const position = this.enemyPositions.get(enemy.id);
+        const scaleTarget = this.enemyScaleTargets.get(enemy.id)?.x ?? enemy.scale;
+        const scale = THREE.MathUtils.lerp(
+          this.enemyScales.get(enemy.id) ?? enemy.scale,
+          scaleTarget,
+          smoothing,
+        );
+        if (target && position) position.lerp(target, smoothing);
+        this.enemyScales.set(enemy.id, scale);
+        this.enemyVisual?.setEnemy(
+          index,
+          position ?? enemy.position,
+          enemy.yaw,
+          scale,
+          enemy.mode !== "stomped",
+        );
+      });
     }
-    if (!this.entityCameraEnabled && this.targetSnapshot?.enemy.mode === "chase") {
+    if (
+      !this.entityCameraEnabled &&
+      this.targetSnapshot?.enemies.some(
+        (enemy) => enemy.mode === "chase" || enemy.mode === "attack",
+      )
+    ) {
       this.camera.position.y += Math.sin(now * 0.018) * 0.006;
     }
     this.renderer.render(this.scene, this.camera);

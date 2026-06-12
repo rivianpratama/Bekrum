@@ -1,4 +1,4 @@
-import type { GameSnapshot, InputIntent, MazeDescriptor, PlayerState } from "./types";
+import type { Difficulty, GameSnapshot, InputIntent, MazeDescriptor, PlayerState } from "./types";
 
 export const Opcode = {
   HELLO: 0,
@@ -25,7 +25,7 @@ export type ControlMessage =
   | [typeof Opcode.HELLO, string, string]
   | [typeof Opcode.WELCOME, string, PlayerState[], "host" | "client"]
   | [typeof Opcode.ROSTER, PlayerState[]]
-  | [typeof Opcode.PREPARE_GAME, MazeDescriptor]
+  | [typeof Opcode.PREPARE_GAME, MazeDescriptor, Difficulty]
   | [typeof Opcode.MAZE_READY, string]
   | [typeof Opcode.GAME_START, number]
   | [typeof Opcode.PLAYER_LEFT, string]

@@ -5,7 +5,7 @@ import { PeerNetwork } from "./network/PeerNetwork";
 import { createRoom, joinRoom, type RoomSession } from "./network/signaling";
 import { MAP_SIZE_DIMENSIONS } from "./shared/config";
 import { Opcode, type ProtocolMessage } from "./shared/protocol";
-import type { MapSize, MazeDescriptor, PlayerState } from "./shared/types";
+import type { Difficulty, MapSize, MazeDescriptor, PlayerState } from "./shared/types";
 import { Lobby } from "./ui/Lobby";
 
 function supportsGame(): boolean {
@@ -22,6 +22,7 @@ export default function App() {
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [descriptor, setDescriptor] = useState<MazeDescriptor | null>(null);
   const [mapSize, setMapSize] = useState<MapSize>("large");
+  const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(supportsGame() ? "" : "This browser lacks WebRTC, WebGL2, or Pointer Lock.");
   const handlerRef = useRef<(senderId: string, message: ProtocolMessage) => void>(() => undefined);
@@ -80,6 +81,7 @@ export default function App() {
             setError("Maze seed mismatch. Rejoin the room.");
             return;
           }
+          setDifficulty(message[2]);
           setDescriptor(message[1]);
           peer.send([Opcode.MAZE_READY, maze.descriptor.hash], nextSession.hostId);
           return;
@@ -135,7 +137,7 @@ export default function App() {
       dimension,
       dimension,
     );
-    network.send([Opcode.PREPARE_GAME, maze.descriptor]);
+    network.send([Opcode.PREPARE_GAME, maze.descriptor, difficulty]);
     window.setTimeout(() => network.send([Opcode.GAME_START, performance.now()]), 400);
     setDescriptor(maze.descriptor);
   };
@@ -153,6 +155,7 @@ export default function App() {
     return (
       <GameView
         descriptor={descriptor}
+        difficulty={difficulty}
         localPlayerId={session.playerId}
         players={players}
         network={network}
@@ -173,6 +176,7 @@ export default function App() {
       isHost={network?.isHost ?? false}
       allowSoloDebug={allowSoloDebug}
       mapSize={mapSize}
+      difficulty={difficulty}
       busy={busy}
       error={error}
       onName={setName}
@@ -180,6 +184,7 @@ export default function App() {
       onCreate={handleCreate}
       onJoin={handleJoin}
       onMapSize={setMapSize}
+      onDifficulty={setDifficulty}
       onStart={handleStart}
     />
   );

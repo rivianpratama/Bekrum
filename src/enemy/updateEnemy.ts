@@ -1,5 +1,9 @@
 import { cellToWorld, isOpen, worldToCell, type Maze, type OfficeZone } from "../maze/generateMaze";
-import { GAME_CONFIG } from "../shared/config";
+import {
+  DIFFICULTY_PROFILES,
+  GAME_CONFIG,
+  type DifficultyProfile,
+} from "../shared/config";
 import type { EnemyState, PlayerState, Vec2 } from "../shared/types";
 import { moveWithCollision } from "../simulation/collision";
 import { distance, enemyScaleForProximity, teamProximityFactor } from "../simulation/rules";
@@ -120,9 +124,14 @@ function wrapAngle(angle: number): number {
  * randomized medium distance, so roaming reads as a deliberate floor patrol
  * rather than ping-ponging between the same two rooms.
  */
-function chooseRoamGoal(maze: Maze, brain: EnemyBrain, fromCell: Vec2): Vec2 {
+function chooseRoamGoal(
+  maze: Maze,
+  brain: EnemyBrain,
+  fromCell: Vec2,
+  profile: DifficultyProfile,
+): Vec2 {
   const currentZoneId = zoneIdAt(maze, fromCell);
-  const preferredDistance = 10 + brain.random() * 26;
+  const preferredDistance = (10 + brain.random() * 26) * profile.roamIntensity;
   let best: OfficeZone | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
   for (const zone of maze.zones) {
@@ -139,7 +148,9 @@ function chooseRoamGoal(maze: Maze, brain: EnemyBrain, fromCell: Vec2): Vec2 {
   }
   const zone = best ?? maze.zones[0];
   brain.recentZones.push(zone.id);
-  if (brain.recentZones.length > 6) brain.recentZones.shift();
+  if (brain.recentZones.length > Math.round(6 * profile.roamIntensity)) {
+    brain.recentZones.shift();
+  }
   for (let attempt = 0; attempt < 14; attempt += 1) {
     const cell = {
       x: zone.x + Math.floor(brain.random() * zone.width),
@@ -155,12 +166,19 @@ function chooseRoamGoal(maze: Maze, brain: EnemyBrain, fromCell: Vec2): Vec2 {
  * cells in adjacent zones so the hunter pushes through side openings and
  * neighbouring rooms instead of pacing the same spot.
  */
-function buildSearchPoints(maze: Maze, brain: EnemyBrain, around: Vec2): Vec2[] {
+function buildSearchPoints(
+  maze: Maze,
+  brain: EnemyBrain,
+  around: Vec2,
+  profile: DifficultyProfile,
+): Vec2[] {
   const center = worldToCell(maze, around);
   const originZone = zoneIdAt(maze, center);
   const picks: { cell: Vec2; score: number }[] = [];
-  for (let attempt = 0; attempt < 28; attempt += 1) {
-    const radius = 2 + brain.random() * ENEMY.searchRadiusCells;
+  const attemptCount = Math.round(28 * profile.searchPersistence);
+  const pointCount = Math.round(4 * profile.searchPersistence);
+  for (let attempt = 0; attempt < attemptCount; attempt += 1) {
+    const radius = 2 + brain.random() * ENEMY.searchRadiusCells * profile.searchPersistence;
     const angle = brain.random() * Math.PI * 2;
     const cell = {
       x: Math.round(center.x + Math.sin(angle) * radius),
@@ -173,14 +191,21 @@ function buildSearchPoints(maze: Maze, brain: EnemyBrain, around: Vec2): Vec2[] 
   picks.sort((a, b) => b.score - a.score);
   const chosen: Vec2[] = [];
   for (const pick of picks) {
-    if (chosen.length >= 4) break;
+    if (chosen.length >= pointCount) break;
     if (chosen.some((cell) => Math.abs(cell.x - pick.cell.x) + Math.abs(cell.z - pick.cell.z) < 3)) continue;
     chosen.push(pick.cell);
   }
   return chosen.map((cell) => cellToWorld(maze, cell));
 }
 
-function ensurePath(maze: Maze, brain: EnemyBrain, startCell: Vec2, goalCell: Vec2, dt: number): void {
+function ensurePath(
+  maze: Maze,
+  brain: EnemyBrain,
+  startCell: Vec2,
+  goalCell: Vec2,
+  dt: number,
+  profile: DifficultyProfile,
+): void {
   brain.repathCooldown -= dt;
   const goalChanged =
     !brain.goalCell || brain.goalCell.x !== goalCell.x || brain.goalCell.z !== goalCell.z;
@@ -188,7 +213,7 @@ function ensurePath(maze: Maze, brain: EnemyBrain, startCell: Vec2, goalCell: Ve
   if (!goalChanged && !exhausted && brain.repathCooldown > 0) return;
   brain.pathSalt = (brain.pathSalt + 0x9e3779b1) >>> 0;
   const cells = findPathCells(maze, startCell, goalCell, {
-    wander: PATH_WANDER[brain.state],
+    wander: PATH_WANDER[brain.state] / profile.roamIntensity,
     salt: brain.pathSalt,
   });
   const halfCell = maze.descriptor.cellSize * 0.22;
@@ -203,7 +228,8 @@ function ensurePath(maze: Maze, brain: EnemyBrain, startCell: Vec2, goalCell: Ve
   });
   brain.pathIndex = 1;
   brain.goalCell = { ...goalCell };
-  brain.repathCooldown = PATH_COMMIT[brain.state] * (0.8 + brain.random() * 0.5);
+  brain.repathCooldown =
+    (PATH_COMMIT[brain.state] * (0.8 + brain.random() * 0.5)) / profile.roamIntensity;
 }
 
 export function updateEnemy(
@@ -212,6 +238,7 @@ export function updateEnemy(
   players: PlayerState[],
   dt: number,
   brain: EnemyBrain,
+  profile: DifficultyProfile = DIFFICULTY_PROFILES.easy,
 ): EnemyUpdate {
   const living = players.filter((player) => player.life === "alive");
   const proximityFactor = teamProximityFactor(players);
@@ -223,7 +250,8 @@ export function updateEnemy(
   // --- Perception -----------------------------------------------------------
   const visible = living.filter(
     (player) =>
-      distance(enemy.position, player.position) <= ENEMY.detectionRange &&
+      distance(enemy.position, player.position) <=
+        ENEMY.detectionRange * profile.detectionPressure &&
       hasLineOfSight(maze, enemy.position, player.position),
   );
 
@@ -242,7 +270,8 @@ export function updateEnemy(
     const loudness = Math.min(1.5, speed / GAME_CONFIG.player.walkSpeed);
     if (
       speed > GAME_CONFIG.player.walkSpeed * 0.5 &&
-      distance(enemy.position, player.position) <= ENEMY.hearingRange * loudness
+      distance(enemy.position, player.position) <=
+        ENEMY.hearingRange * loudness * profile.detectionPressure
     ) {
       // Footstep stimulus with positional error: it knows roughly, not exactly.
       heard = {
@@ -271,7 +300,7 @@ export function updateEnemy(
 
   // --- Memory and state transitions ------------------------------------------
   const memoryRemaining = seesTarget
-    ? ENEMY.memorySeconds
+    ? ENEMY.memorySeconds * profile.chaseCommitment
     : Math.max(0, enemy.memoryRemaining - dt);
   let lastSeenPosition = seesTarget ? { ...target.position } : enemy.lastSeenPosition;
 
@@ -292,8 +321,8 @@ export function updateEnemy(
     if (!lastSeenPosition) {
       brain.state = "roam";
     } else if (distance(enemy.position, lastSeenPosition) <= GOAL_REACH) {
-      brain.searchQueue = buildSearchPoints(maze, brain, lastSeenPosition);
-      brain.searchTimer = ENEMY.searchDuration;
+      brain.searchQueue = buildSearchPoints(maze, brain, lastSeenPosition, profile);
+      brain.searchTimer = ENEMY.searchDuration * profile.searchPersistence;
       brain.state = brain.searchQueue.length > 0 ? "search" : "roam";
       if (brain.state === "roam") lastSeenPosition = null;
     }
@@ -321,8 +350,8 @@ export function updateEnemy(
       brain.goalCell !== null &&
       distance(enemy.position, cellToWorld(maze, brain.goalCell)) <= GOAL_REACH;
     if (!brain.goalCell || arrived || brain.roamTimer <= 0) {
-      brain.goalCell = chooseRoamGoal(maze, brain, startCell);
-      brain.roamTimer = 12 + brain.random() * 10;
+      brain.goalCell = chooseRoamGoal(maze, brain, startCell, profile);
+      brain.roamTimer = (12 + brain.random() * 10) / profile.roamIntensity;
       brain.repathCooldown = 0;
     }
   }
@@ -348,7 +377,7 @@ export function updateEnemy(
           : brain.state === "search"
             ? brain.searchQueue[0] ?? enemy.position
             : cellToWorld(maze, brain.goalCell ?? startCell);
-    ensurePath(maze, brain, startCell, worldToCell(maze, goalWorld), dt);
+    ensurePath(maze, brain, startCell, worldToCell(maze, goalWorld), dt, profile);
     while (
       brain.pathIndex < brain.path.length &&
       distance(enemy.position, brain.path[brain.pathIndex]) <= WAYPOINT_REACH
@@ -430,6 +459,7 @@ export function updateEnemy(
 
   return {
     enemy: {
+      id: enemy.id,
       position,
       yaw: brain.heading,
       scale,

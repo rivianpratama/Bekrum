@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { generateMaze, gridToWorld } from "../maze/generateMaze";
+import { DIFFICULTY_PROFILES } from "../shared/config";
 import type { EnemyState, PlayerState } from "../shared/types";
 import { createEnemyBrain } from "./brain";
 import { hasLineOfSight, updateEnemy } from "./updateEnemy";
@@ -18,6 +19,7 @@ function player(position: { x: number; z: number }): PlayerState {
 
 function enemy(position: { x: number; z: number }): EnemyState {
   return {
+    id: "enemy-1",
     position,
     yaw: 0,
     scale: 1,
@@ -71,6 +73,32 @@ describe("office enemy perception", () => {
     expect(expired.enemy.mode).toBe("investigate");
     expect(expired.enemy.targetId).toBeNull();
     expect(expired.enemy.lastSeenPosition).toEqual({ ...position });
+  });
+
+  it("commits to pursuit longer on higher difficulties without changing core states", () => {
+    const maze = generateMaze(52);
+    const spawn = maze.spawnCells[0];
+    const position = gridToWorld(maze, { x: spawn.x + 0.5, z: spawn.z + 0.5 });
+    const target = player({ x: position.x + 2, z: position.z });
+    const easy = updateEnemy(
+      maze,
+      enemy(position),
+      [target],
+      0.05,
+      createEnemyBrain(52),
+      DIFFICULTY_PROFILES.easy,
+    );
+    const hard = updateEnemy(
+      maze,
+      enemy(position),
+      [target],
+      0.05,
+      createEnemyBrain(52),
+      DIFFICULTY_PROFILES.hard,
+    );
+
+    expect(hard.enemy.mode).toBe(easy.enemy.mode);
+    expect(hard.enemy.memoryRemaining).toBeGreaterThan(easy.enemy.memoryRemaining);
   });
 
   it("sweeps nearby spaces after investigating, then returns to roaming", () => {

@@ -42,11 +42,14 @@ export function SoloDebugMap({ maze, snapshot, localPlayerId }: SoloDebugMapProp
       );
     }
 
-    const enemy = worldToCell(maze, snapshot.enemy.position);
     context.fillStyle = "#e34c2d";
-    context.beginPath();
-    context.arc((enemy.x + 0.5) * scaleX, (enemy.z + 0.5) * scaleZ, 3, 0, Math.PI * 2);
-    context.fill();
+    for (const enemyState of snapshot.enemies) {
+      if (enemyState.mode === "stomped") continue;
+      const enemy = worldToCell(maze, enemyState.position);
+      context.beginPath();
+      context.arc((enemy.x + 0.5) * scaleX, (enemy.z + 0.5) * scaleZ, 3, 0, Math.PI * 2);
+      context.fill();
+    }
 
     const local = snapshot.players.find((player) => player.id === localPlayerId);
     if (local) {

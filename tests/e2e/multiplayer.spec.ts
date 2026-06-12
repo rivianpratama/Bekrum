@@ -27,11 +27,16 @@ test("two peers create, join, and start a host-authoritative game", async ({ con
   await expect(host.getByText("Peer")).toBeVisible({ timeout: 10_000 });
   await expect(peer.getByText("Host", { exact: true })).toBeVisible({ timeout: 10_000 });
   await host.getByLabel("MAP SIZE").selectOption("medium");
+  await expect(host.getByLabel("DIFFICULTY")).toHaveValue("easy");
+  await host.getByLabel("DIFFICULTY").selectOption("medium");
   await host.getByRole("button", { name: "START DESCENT" }).click();
 
   await expect(host.locator("canvas")).toBeVisible();
   await expect(peer.locator("canvas")).toBeVisible({ timeout: 10_000 });
   await expect(host.getByText("REGROUP. WEAKEN IT. HOLD E TO STOMP.")).toBeVisible();
+  await expect(host.getByText("MEDIUM · 5 ENTITIES REMAIN")).toBeVisible();
+  await expect(peer.getByText("MEDIUM · 5 ENTITIES REMAIN")).toBeVisible();
+  await expect.poll(() => host.locator("canvas").getAttribute("data-enemy-count")).toBe("5");
   await expect
     .poll(() => host.locator("canvas").getAttribute("data-clutter-visual"))
     .toBe("fallback");

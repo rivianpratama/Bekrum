@@ -1,26 +1,34 @@
 import { createEnemyBrain, type EnemyBrain } from "../enemy/brain";
 import { updateEnemy } from "../enemy/updateEnemy";
 import { cellToWorld, chooseEnemySpawn, isOpen, type Maze } from "../maze/generateMaze";
-import { GAME_CONFIG } from "../shared/config";
-import type { EnemyState, GameSnapshot, InputIntent, PlayerState, RoomPhase } from "../shared/types";
+import { DIFFICULTY_PROFILES, GAME_CONFIG } from "../shared/config";
+import type {
+  Difficulty,
+  EnemyState,
+  GameSnapshot,
+  InputIntent,
+  PlayerState,
+  RoomPhase,
+} from "../shared/types";
 import { moveWithCollision } from "./collision";
 import { isStompReady } from "./rules";
 
 export class GameSimulation {
   readonly players = new Map<string, PlayerState>();
-  readonly enemy: EnemyState;
+  readonly enemies: EnemyState[] = [];
   phase: RoomPhase = "playing";
   tick = 0;
   proximityFactor = 0;
   stompProgress = 0;
   private contactTimers = new Map<string, number>();
   /** Host-only AI memory; never serialized, keeping the host authoritative. */
-  private readonly enemyBrain: EnemyBrain;
+  private readonly enemyBrains = new Map<string, EnemyBrain>();
 
   constructor(
     readonly maze: Maze,
     initialPlayers: PlayerState[],
     private readonly soloDebug = false,
+    readonly difficulty: Difficulty = "easy",
   ) {
     const activeSpawnCells: { x: number; z: number }[] = [];
     initialPlayers.forEach((player, index) => {
@@ -41,17 +49,31 @@ export class GameSimulation {
         stompHeld: false,
       });
     });
-    const enemySpawn = chooseEnemySpawn(maze, activeSpawnCells);
-    this.enemy = {
-      position: cellToWorld(maze, enemySpawn),
-      yaw: 0,
-      scale: 1,
-      mode: "roam",
-      targetId: null,
-      lastSeenPosition: null,
-      memoryRemaining: 0,
-    };
-    this.enemyBrain = createEnemyBrain(maze.descriptor.seed);
+    const occupiedSpawnCells = [...activeSpawnCells];
+    const profile = DIFFICULTY_PROFILES[difficulty];
+    for (let index = 0; index < profile.enemyCount; index += 1) {
+      const enemySpawn = chooseEnemySpawn(maze, occupiedSpawnCells);
+      occupiedSpawnCells.push(enemySpawn);
+      const id = `enemy-${index + 1}`;
+      this.enemies.push({
+        id,
+        position: cellToWorld(maze, enemySpawn),
+        yaw: 0,
+        scale: 1,
+        mode: "roam",
+        targetId: null,
+        lastSeenPosition: null,
+        memoryRemaining: 0,
+      });
+      this.enemyBrains.set(
+        id,
+        createEnemyBrain((maze.descriptor.seed + Math.imul(index, 0x9e3779b1)) >>> 0),
+      );
+    }
+  }
+
+  get enemy(): EnemyState {
+    return this.enemies.find((enemy) => enemy.mode !== "stomped") ?? this.enemies[0];
   }
 
   applyInput(playerId: string, input: InputIntent): void {
@@ -80,13 +102,21 @@ export class GameSimulation {
   update(dt: number): void {
     if (this.phase !== "playing") return;
     this.tick += 1;
-    const result = updateEnemy(this.maze, this.enemy, [...this.players.values()], dt, this.enemyBrain);
-    Object.assign(this.enemy, result.enemy);
-    this.proximityFactor = result.proximityFactor;
+    const players = [...this.players.values()];
+    const contactedPlayerIds = new Set<string>();
+    const profile = DIFFICULTY_PROFILES[this.difficulty];
+    for (const enemy of this.enemies) {
+      const brain = this.enemyBrains.get(enemy.id);
+      if (!brain) continue;
+      const result = updateEnemy(this.maze, enemy, players, dt, brain, profile);
+      Object.assign(enemy, result.enemy);
+      this.proximityFactor = result.proximityFactor;
+      if (result.contactedPlayerId) contactedPlayerIds.add(result.contactedPlayerId);
+    }
 
     for (const player of this.players.values()) {
       if (player.life !== "alive") continue;
-      const contact = result.contactedPlayerId === player.id;
+      const contact = contactedPlayerIds.has(player.id);
       const timer = contact ? (this.contactTimers.get(player.id) ?? 0) + dt : 0;
       this.contactTimers.set(player.id, timer);
       if (timer >= GAME_CONFIG.enemy.contactSecondsToDown) {
@@ -94,21 +124,30 @@ export class GameSimulation {
       }
     }
 
-    const players = [...this.players.values()];
-    const living = players.filter((player) => player.life === "alive");
+    const currentPlayers = [...this.players.values()];
+    const living = currentPlayers.filter((player) => player.life === "alive");
     const minimumLivingPlayers = this.soloDebug ? 1 : GAME_CONFIG.room.minPlayers;
     if (living.length < minimumLivingPlayers) {
       this.phase = "lost";
       return;
     }
-    const ready = isStompReady(players, this.enemy, this.proximityFactor);
+    const stompTarget = this.enemies.find(
+      (enemy) =>
+        enemy.mode !== "stomped" &&
+        isStompReady(currentPlayers, enemy, this.proximityFactor),
+    );
     const allHolding = living.every((player) => player.stompHeld);
-    this.stompProgress = ready && allHolding
+    this.stompProgress = stompTarget && allHolding
       ? Math.min(1, this.stompProgress + dt / GAME_CONFIG.stomp.confirmationSeconds)
       : Math.max(0, this.stompProgress - dt * 2);
-    if (this.stompProgress >= 1) {
-      this.enemy.mode = "stomped";
-      this.phase = "won";
+    if (this.stompProgress >= 1 && stompTarget) {
+      stompTarget.mode = "stomped";
+      stompTarget.targetId = null;
+      if (this.enemies.every((enemy) => enemy.mode === "stomped")) {
+        this.phase = "won";
+      } else {
+        this.stompProgress = 0;
+      }
     }
   }
 
@@ -118,7 +157,11 @@ export class GameSimulation {
       serverTime: performance.now(),
       phase: this.phase,
       players: [...this.players.values()],
-      enemy: { ...this.enemy, position: { ...this.enemy.position } },
+      enemies: this.enemies.map((enemy) => ({
+        ...enemy,
+        position: { ...enemy.position },
+        lastSeenPosition: enemy.lastSeenPosition ? { ...enemy.lastSeenPosition } : null,
+      })),
       proximityFactor: this.proximityFactor,
       stompProgress: this.stompProgress,
     };

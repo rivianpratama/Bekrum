@@ -3,8 +3,15 @@ import { Atmosphere } from "../audio/Atmosphere";
 import { InputController } from "../input/InputController";
 import { generateMaze } from "../maze/generateMaze";
 import type { PeerNetwork } from "../network/PeerNetwork";
+import { DIFFICULTY_PROFILES } from "../shared/config";
 import { Opcode, type ProtocolMessage } from "../shared/protocol";
-import type { GameSnapshot, InputIntent, MazeDescriptor, PlayerState } from "../shared/types";
+import type {
+  Difficulty,
+  GameSnapshot,
+  InputIntent,
+  MazeDescriptor,
+  PlayerState,
+} from "../shared/types";
 import { GameRenderer } from "../rendering/GameRenderer";
 import { GameSimulation } from "../simulation/GameSimulation";
 import { distance } from "../simulation/rules";
@@ -12,6 +19,7 @@ import { SoloDebugMap } from "./SoloDebugMap";
 
 interface GameViewProps {
   descriptor: MazeDescriptor;
+  difficulty: Difficulty;
   localPlayerId: string;
   players: PlayerState[];
   network: PeerNetwork;
@@ -22,6 +30,7 @@ interface GameViewProps {
 
 export function GameView({
   descriptor,
+  difficulty,
   localPlayerId,
   players,
   network,
@@ -46,10 +55,17 @@ export function GameView({
     if (maze.descriptor.hash !== descriptor.hash) {
       throw new Error("Maze reconstruction failed. Seed hash does not match host.");
     }
-    const renderer = new GameRenderer(canvas, maze, localPlayerId);
+    const renderer = new GameRenderer(
+      canvas,
+      maze,
+      localPlayerId,
+      DIFFICULTY_PROFILES[difficulty].enemyCount,
+    );
     const input = new InputController(canvas);
     const audio = new Atmosphere();
-    const simulation = isHost ? new GameSimulation(maze, players, soloDebug) : null;
+    const simulation = isHost
+      ? new GameSimulation(maze, players, soloDebug, difficulty)
+      : null;
     const initialSnapshot = simulation?.snapshot() ?? null;
     let uiAccumulator = 0;
     const initialLocal = initialSnapshot?.players.find((player) => player.id === localPlayerId);
@@ -65,8 +81,11 @@ export function GameView({
       renderer.setSnapshot(nextSnapshot, input.pitch);
       const localPlayer = nextSnapshot.players.find((player) => player.id === localPlayerId);
       audio.setAggro(
-        (nextSnapshot.enemy.mode === "chase" || nextSnapshot.enemy.mode === "attack") &&
-          nextSnapshot.enemy.targetId === localPlayerId,
+        nextSnapshot.enemies.some(
+          (enemy) =>
+            (enemy.mode === "chase" || enemy.mode === "attack") &&
+            enemy.targetId === localPlayerId,
+        ),
       );
       audio.updateFootsteps(
         localPlayer?.position ?? null,
@@ -141,6 +160,7 @@ export function GameView({
     };
   }, [
     descriptor.hash,
+    difficulty,
     entityCameraAvailable,
     isHost,
     localPlayerId,
@@ -152,14 +172,24 @@ export function GameView({
   ]);
 
   const local = snapshot?.players.find((player) => player.id === localPlayerId);
+  const activeEnemies = snapshot?.enemies.filter((enemy) => enemy.mode !== "stomped") ?? [];
+  const primaryEnemy = activeEnemies[0] ?? snapshot?.enemies[0];
+  const remainingEnemyCount = snapshot
+    ? activeEnemies.length
+    : DIFFICULTY_PROFILES[difficulty].enemyCount;
+  const underPressure = activeEnemies.some(
+    (enemy) => enemy.mode === "chase" || enemy.mode === "attack",
+  );
   const grouped = (snapshot?.proximityFactor ?? 0) >= 0.9;
-  const stompReady =
-    grouped &&
-    (snapshot?.enemy.scale ?? 1) <= 0.35 &&
-    (snapshot?.players.filter((player) => player.life === "alive").every(
-      (player) => snapshot && distance(player.position, snapshot.enemy.position) <= 2.5,
-    ) ?? false) &&
-    (snapshot?.stompProgress ?? 0) < 1;
+  const stompReady = activeEnemies.some(
+    (enemy) =>
+      grouped &&
+      enemy.scale <= 0.35 &&
+      (snapshot?.players
+        .filter((player) => player.life === "alive")
+        .every((player) => distance(player.position, enemy.position) <= 2.5) ??
+        false),
+  ) && (snapshot?.stompProgress ?? 0) < 1;
   const result = snapshot?.phase === "won" ? "VICTORY" : snapshot?.phase === "lost" ? "DEFEAT" : null;
   const debug = new URLSearchParams(window.location.search).has("debug");
 
@@ -170,15 +200,15 @@ export function GameView({
         className="game-canvas"
         aria-label={entityCamera ? "Enemy third person view" : "First person game view"}
       />
-      <div
-        className={`vignette ${
-          snapshot?.enemy.mode === "chase" || snapshot?.enemy.mode === "attack" ? "is-aggro" : ""
-        }`}
-      />
+      <div className={`vignette ${underPressure ? "is-aggro" : ""}`} />
       <div className="crosshair" aria-hidden="true" />
       <div className="hud-top">
         <span>OBJECTIVE</span>
         <strong>REGROUP. WEAKEN IT. HOLD E TO STOMP.</strong>
+        <span>
+          {difficulty.toUpperCase()} · {remainingEnemyCount}{" "}
+          {remainingEnemyCount === 1 ? "ENTITY" : "ENTITIES"} REMAIN
+        </span>
       </div>
       <div className="hud-status">
         <div className={grouped ? "status-good" : ""}>
@@ -187,10 +217,10 @@ export function GameView({
         </div>
         <div>
           <span>ENTITY MASS</span>
-          <strong>{Math.round((snapshot?.enemy.scale ?? 1) * 100)}%</strong>
+          <strong>{Math.round((primaryEnemy?.scale ?? 1) * 100)}%</strong>
         </div>
       </div>
-      {snapshot?.enemy.mode === "chase" || snapshot?.enemy.mode === "attack" ? (
+      {underPressure ? (
         <div className="aggro-alert">IT SEES YOU</div>
       ) : null}
       {entityCameraAvailable ? (
@@ -222,10 +252,12 @@ export function GameView({
             `phase ${snapshot.phase}`,
             `life ${local?.life ?? "missing"}`,
             `camera ${entityCamera ? "entity" : "player"}`,
-            `enemy ${snapshot.enemy.mode} ${snapshot.enemy.scale.toFixed(2)}`,
-            `range ${local ? distance(local.position, snapshot.enemy.position).toFixed(1) : "-"}`,
+            `difficulty ${difficulty}`,
+            `enemies ${activeEnemies.length}/${snapshot.enemies.length}`,
+            `enemy ${primaryEnemy?.mode ?? "none"} ${primaryEnemy?.scale.toFixed(2) ?? "-"}`,
+            `range ${local && primaryEnemy ? distance(local.position, primaryEnemy.position).toFixed(1) : "-"}`,
             `you ${local ? `${local.position.x.toFixed(1)},${local.position.z.toFixed(1)}` : "-"}`,
-            `entity ${snapshot.enemy.position.x.toFixed(1)},${snapshot.enemy.position.z.toFixed(1)}`,
+            `entity ${primaryEnemy ? `${primaryEnemy.position.x.toFixed(1)},${primaryEnemy.position.z.toFixed(1)}` : "-"}`,
           ].join("\n")}
         </pre>
       ) : null}
