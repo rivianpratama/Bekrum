@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>BEKRUM</h1>
+  <h1>BEKRUM the game</h1>
   <p><strong>A lean, browser-based, cooperative horror prototype.</strong></p>
   
   <p>
