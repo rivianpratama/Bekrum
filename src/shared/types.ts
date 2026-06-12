@@ -6,7 +6,7 @@ export type EnemyMode = "roam" | "investigate" | "search" | "chase" | "attack" |
 export type MapSize = "small" | "medium" | "large";
 
 export interface MazeDescriptor {
-  generatorVersion: "office-v2";
+  generatorVersion: "office-v3";
   seed: number;
   width: number;
   height: number;

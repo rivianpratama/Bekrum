@@ -4,6 +4,7 @@ test("two peers create, join, and start a host-authoritative game", async ({ con
   const errors: string[] = [];
   const host = await context.newPage();
   await host.route("**/assets/enemy.splat", (route) => route.abort());
+  await host.route("**/assets/clutter/*.splat", (route) => route.abort());
   host.on("pageerror", (error) => errors.push(`host: ${error.message}`));
   await host.goto("/");
   await expect(host).toHaveTitle("BEKRUM");
@@ -16,6 +17,7 @@ test("two peers create, join, and start a host-authoritative game", async ({ con
 
   const peer = await context.newPage();
   await peer.route("**/assets/enemy.splat", (route) => route.abort());
+  await peer.route("**/assets/clutter/*.splat", (route) => route.abort());
   peer.on("pageerror", (error) => errors.push(`peer: ${error.message}`));
   await peer.goto("/");
   await peer.getByLabel("CALLSIGN").fill("Peer");
@@ -30,6 +32,9 @@ test("two peers create, join, and start a host-authoritative game", async ({ con
   await expect(host.locator("canvas")).toBeVisible();
   await expect(peer.locator("canvas")).toBeVisible({ timeout: 10_000 });
   await expect(host.getByText("REGROUP. WEAKEN IT. HOLD E TO STOMP.")).toBeVisible();
+  await expect
+    .poll(() => host.locator("canvas").getAttribute("data-clutter-visual"))
+    .toBe("fallback");
   expect(errors).toEqual([]);
 });
 

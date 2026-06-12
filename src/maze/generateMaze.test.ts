@@ -33,6 +33,14 @@ function reachableCells(seed: number, dimension?: number) {
   return { maze, visited };
 }
 
+function nonPocketOpenCount(maze: ReturnType<typeof generateMaze>): number {
+  return [...maze.cells].filter((open, index) => {
+    if (!open) return false;
+    const zoneId = (maze.zoneIds[index] || 1) - 1;
+    return !maze.sealedPocketZoneIds.includes(zoneId);
+  }).length;
+}
+
 describe("office floor generation", () => {
   it("is deterministic for a seed", () => {
     const first = generateMaze(12345);
@@ -42,6 +50,7 @@ describe("office floor generation", () => {
     expect(first.edges).toEqual(second.edges);
     expect(first.zoneIds).toEqual(second.zoneIds);
     expect(first.features).toEqual(second.features);
+    expect(first.clutter).toEqual(second.clutter);
     expect(first.spawnCells).toEqual(second.spawnCells);
     expect(first.enemySpawnCell).toEqual(second.enemySpawnCell);
     expect(generateMaze(12346).descriptor.hash).not.toBe(first.descriptor.hash);
@@ -49,8 +58,8 @@ describe("office floor generation", () => {
 
   it("creates one connected 300 meter office floor with separated spawns", () => {
     const { maze, visited } = reachableCells(42);
-    const openCount = [...maze.cells].filter(Boolean).length;
-    expect(maze.descriptor.generatorVersion).toBe("office-v2");
+    const openCount = nonPocketOpenCount(maze);
+    expect(maze.descriptor.generatorVersion).toBe("office-v3");
     expect(maze.descriptor.width).toBe(151);
     expect(maze.descriptor.height).toBe(151);
     expect(maze.zones.length).toBeGreaterThanOrEqual(45);
@@ -75,7 +84,7 @@ describe("office floor generation", () => {
   it("keeps representative generated floors connected", () => {
     for (const seed of [7, 42, 91, 12345, 271959538]) {
       const { maze, visited } = reachableCells(seed);
-      expect(visited.size, `seed ${seed}`).toBe([...maze.cells].filter(Boolean).length);
+      expect(visited.size, `seed ${seed}`).toBe(nonPocketOpenCount(maze));
     }
   });
 
@@ -85,7 +94,7 @@ describe("office floor generation", () => {
       expect(maze.descriptor.width).toBe(dimension);
       expect(maze.descriptor.height).toBe(dimension);
       expect(visited.size, `${dimension}x${dimension}`).toBe(
-        [...maze.cells].filter(Boolean).length,
+        nonPocketOpenCount(maze),
       );
       expect(new Set(maze.spawnCells.map((cell) => `${cell.x},${cell.z}`)).size).toBe(6);
     }
@@ -115,7 +124,7 @@ describe("office floor generation", () => {
     expect(broadZones / maze.zones.length).toBeGreaterThan(0.65);
     expect(
       maze.features.every((feature) =>
-        ["wall", "divider", "counter", "pillar"].includes(feature.kind),
+        ["wall", "divider", "counter", "pillar", "clutter"].includes(feature.kind),
       ),
     ).toBe(true);
   });

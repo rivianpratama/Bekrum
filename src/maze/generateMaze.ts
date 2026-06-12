@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from "../shared/config";
 import type { MazeDescriptor, Vec2 } from "../shared/types";
+import { placeClutter } from "./placeClutter";
 import { createRandom } from "./random";
 
 export const Edge = {
@@ -9,7 +10,7 @@ export const Edge = {
   West: 8,
 } as const;
 
-export type OfficeFeatureKind = "wall" | "divider" | "counter" | "pillar";
+export type OfficeFeatureKind = "wall" | "divider" | "counter" | "pillar" | "clutter";
 
 export interface OfficeFeature {
   kind: OfficeFeatureKind;
@@ -29,6 +30,18 @@ export interface OfficeZone {
   height: number;
 }
 
+export interface ClutterInstance {
+  assetId: string;
+  x: number;
+  z: number;
+  y: number;
+  yaw: number;
+  tiltAxis: 0 | 1;
+  tiltAngle: number;
+  scale: number;
+  featureIndex: number;
+}
+
 export interface Maze {
   descriptor: MazeDescriptor;
   cells: Uint8Array;
@@ -36,6 +49,9 @@ export interface Maze {
   zoneIds: Uint16Array;
   zones: OfficeZone[];
   features: OfficeFeature[];
+  clutter: ClutterInstance[];
+  doorCells: Vec2[];
+  sealedPocketZoneIds: number[];
   featureGrid: Map<number, OfficeFeature[]>;
   spawnCells: Vec2[];
   enemySpawnCell: Vec2;
@@ -73,6 +89,7 @@ function hashMap(
   edges: Uint8Array,
   zoneIds: Uint16Array,
   features: OfficeFeature[],
+  clutter: ClutterInstance[],
   spawnCells: Vec2[],
   enemySpawnCell: Vec2,
 ): string {
@@ -96,6 +113,24 @@ function hashMap(
       feature.depth,
       feature.height,
       Number(feature.blocksSight),
+    ]) {
+      const quantized = Math.round(value * 100);
+      add(quantized);
+      add(quantized >>> 8);
+      add(quantized >>> 16);
+    }
+  }
+  for (const instance of clutter) {
+    for (const value of [
+      instance.x,
+      instance.z,
+      instance.y,
+      instance.yaw,
+      instance.tiltAxis,
+      instance.tiltAngle,
+      instance.scale,
+      instance.assetId.length,
+      ...[...instance.assetId].map((character) => character.charCodeAt(0)),
     ]) {
       const quantized = Math.round(value * 100);
       add(quantized);
@@ -710,12 +745,14 @@ export function chooseEnemySpawn(maze: Maze, playerSpawns: Vec2[]): Vec2 {
 }
 
 function chooseSpawns(maze: Maze, random: () => number): { players: Vec2[]; enemy: Vec2 } {
-  const candidates = maze.zones.map((zone) =>
-    nearestOpenCell(maze, {
-      x: Math.floor(zone.x + zone.width / 2),
-      z: Math.floor(zone.z + zone.height / 2),
-    }),
-  );
+  const candidates = maze.zones
+    .filter((zone) => !maze.sealedPocketZoneIds.includes(zone.id))
+    .map((zone) =>
+      nearestOpenCell(maze, {
+        x: Math.floor(zone.x + zone.width / 2),
+        z: Math.floor(zone.z + zone.height / 2),
+      }),
+    );
   const selected: Vec2[] = [candidates[Math.floor(random() * candidates.length)]];
   const fields = [distanceField(maze, selected[0])];
   while (selected.length < GAME_CONFIG.room.maxPlayers) {
@@ -1134,10 +1171,9 @@ export function generateMaze(
   }
 
   repairConnectivity(cells, edges, features, safeWidth, safeHeight);
-  const featureGrid = buildFeatureGrid(features, safeWidth, safeHeight);
   const provisional: Maze = {
     descriptor: {
-      generatorVersion: "office-v2",
+      generatorVersion: "office-v3",
       seed,
       width: safeWidth,
       height: safeHeight,
@@ -1150,10 +1186,15 @@ export function generateMaze(
     zoneIds,
     zones,
     features,
-    featureGrid,
+    clutter: [],
+    doorCells: [],
+    sealedPocketZoneIds: [],
+    featureGrid: new Map(),
     spawnCells: [],
     enemySpawnCell: { x: 1, z: 1 },
   };
+  if (GAME_CONFIG.clutter.enabled) placeClutter(provisional, random);
+  provisional.featureGrid = buildFeatureGrid(features, safeWidth, safeHeight);
   const spawns = chooseSpawns(provisional, random);
   provisional.spawnCells = spawns.players;
   provisional.enemySpawnCell = spawns.enemy;
@@ -1162,6 +1203,7 @@ export function generateMaze(
     edges,
     zoneIds,
     features,
+    provisional.clutter,
     spawns.players,
     spawns.enemy,
   );

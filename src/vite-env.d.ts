@@ -18,6 +18,15 @@ declare module "@mkkellogg/gaussian-splats-3d" {
         scale?: [number, number, number];
       },
     ): Promise<void>;
+    addSplatScenes(
+      scenes: Array<{
+        path: string;
+        position?: [number, number, number];
+        rotation?: [number, number, number, number];
+        scale?: [number, number, number];
+      }>,
+      showLoadingUI?: boolean,
+    ): Promise<void>;
     dispose(): void;
   }
 }

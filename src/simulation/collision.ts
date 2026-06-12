@@ -2,7 +2,7 @@ import type { Maze, OfficeFeature } from "../maze/generateMaze";
 import { isOpen, worldToCell } from "../maze/generateMaze";
 import type { Vec2 } from "../shared/types";
 
-function featureBounds(maze: Maze, feature: OfficeFeature) {
+export function featureBounds(maze: Maze, feature: OfficeFeature) {
   const { cellSize, width, height } = maze.descriptor;
   const centerX = (feature.x - width / 2) * cellSize;
   const centerZ = (feature.z - height / 2) * cellSize;

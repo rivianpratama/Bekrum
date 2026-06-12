@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "convert:enemy": "node scripts/convert-ply-to-splat.mjs",
+    "prep:clutter": "node scripts/downsample-splat.mjs --max-splats 20000 public/assets/clutter",
     "preview": "vite preview"
   },
   "dependencies": {

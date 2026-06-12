@@ -26,6 +26,23 @@ export const GAME_CONFIG = {
     repetition: 0.72,
     spawnSeparationMeters: 90,
   },
+  clutter: {
+    enabled: true,
+    maxInstances: 160,
+    navClearanceMeters: 0.95,
+    doorClearanceMeters: 0.95,
+    colliderShrink: 0.85,
+    sealedPocketChance: 0.04,
+    maxSealedPockets: 2,
+    maxSplatsPerAsset: 20_000,
+    archetypeWeights: {
+      empty: 0.18,
+      sparse: 0.34,
+      cluster: 0.22,
+      barricade: 0.14,
+      swallowed: 0.12,
+    },
+  },
   player: {
     radius: 0.38,
     walkSpeed: 5.2,

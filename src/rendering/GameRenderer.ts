@@ -3,6 +3,7 @@ import { loadEnemyVisual, type EnemyVisual } from "../assets/EnemyVisual";
 import { gridToWorld, type Maze, type OfficeFeatureKind } from "../maze/generateMaze";
 import { GAME_CONFIG } from "../shared/config";
 import type { GameSnapshot } from "../shared/types";
+import { loadClutterVisuals, type ClutterVisuals } from "./ClutterVisuals";
 
 export class GameRenderer {
   private readonly scene = new THREE.Scene();
@@ -16,6 +17,8 @@ export class GameRenderer {
   private readonly entityCameraTarget = new THREE.Vector3();
   private readonly entityLookTarget = new THREE.Vector3();
   private enemyVisual: EnemyVisual | null = null;
+  private clutterVisuals: ClutterVisuals | null = null;
+  private disposed = false;
   private entityCameraEnabled = false;
   private raf = 0;
   private targetSnapshot: GameSnapshot | null = null;
@@ -40,7 +43,7 @@ export class GameRenderer {
     this.scene.fog = new THREE.Fog(0xd8d0ad, 38, 76);
     this.camera.rotation.order = "YXZ";
     this.buildMaze();
-    void this.attachEnemy();
+    void this.attachVisuals();
     window.addEventListener("resize", this.resize);
     this.resize();
     this.render();
@@ -112,9 +115,11 @@ export class GameRenderer {
   }
 
   dispose(): void {
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.resize);
     this.enemyVisual?.dispose();
+    this.clutterVisuals?.dispose();
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh) {
         object.geometry.dispose();
@@ -126,7 +131,12 @@ export class GameRenderer {
   }
 
   private async attachEnemy(): Promise<void> {
-    this.enemyVisual = await loadEnemyVisual();
+    const visual = await loadEnemyVisual();
+    if (this.disposed) {
+      visual.dispose();
+      return;
+    }
+    this.enemyVisual = visual;
     this.canvas.dataset.enemyVisual = this.enemyVisual.usedFallback ? "fallback" : "splat";
     if (this.targetSnapshot) {
       const enemy = this.targetSnapshot.enemy;
@@ -136,6 +146,22 @@ export class GameRenderer {
       this.enemyVisual.object.scale.copy(this.enemyScaleTarget);
     }
     this.scene.add(this.enemyVisual.object);
+  }
+
+  private async attachVisuals(): Promise<void> {
+    await this.attachEnemy();
+    if (!this.disposed) await this.attachClutter();
+  }
+
+  private async attachClutter(): Promise<void> {
+    const visuals = await loadClutterVisuals(this.maze);
+    if (this.disposed) {
+      visuals.dispose();
+      return;
+    }
+    this.clutterVisuals = visuals;
+    this.canvas.dataset.clutterVisual = visuals.status;
+    this.scene.add(visuals.object);
   }
 
   private createCeilingTexture(): THREE.CanvasTexture {
@@ -182,6 +208,7 @@ export class GameRenderer {
     const featureGeometry = new THREE.BoxGeometry(1, 1, 1);
     const featureGroups = new Map<OfficeFeatureKind, typeof this.maze.features>();
     for (const feature of this.maze.features) {
+      if (feature.kind === "clutter") continue;
       const group = featureGroups.get(feature.kind) ?? [];
       group.push(feature);
       featureGroups.set(feature.kind, group);
