@@ -13,7 +13,10 @@ export interface ClutterVisuals {
   dispose(): void;
 }
 
-const MAX_TOTAL_SPLATS = 40_000;
+const MAX_TOTAL_SPLATS = Math.min(
+  4_000_000,
+  GAME_CONFIG.clutter.maxInstances * GAME_CONFIG.clutter.maxSplatsPerAsset,
+);
 
 function instanceRotation(
   asset: ClutterAsset,
@@ -32,7 +35,9 @@ function instanceRotation(
   return yaw.multiply(tilt).multiply(fix);
 }
 
-function selectedSplatIndexes(clutter: readonly ClutterInstance[]): Set<number> {
+export function selectedSplatIndexes(
+  clutter: readonly ClutterInstance[],
+): Set<number> {
   const sceneBudget = Math.floor(
     MAX_TOTAL_SPLATS / GAME_CONFIG.clutter.maxSplatsPerAsset,
   );
@@ -121,32 +126,14 @@ export async function loadClutterVisuals(maze: Maze): Promise<ClutterVisuals> {
   );
 
   const fallbackIndexes: number[] = [];
-  const sceneOptions: Array<{
-    path: string;
+  const transforms: Array<{
     position: [number, number, number];
     rotation: [number, number, number, number];
     scale: [number, number, number];
   }> = [];
-  for (let index = 0; index < maze.clutter.length; index += 1) {
-    const instance = maze.clutter[index];
-    const asset = CLUTTER_ASSET_BY_ID.get(instance.assetId);
-    if (!asset || !selected.has(index) || !availableByUrl.get(asset.url)) {
-      fallbackIndexes.push(index);
-      continue;
-    }
-    const position = gridToWorld(maze, instance);
-    const rotation = instanceRotation(asset, instance);
-    const scale = asset.splatScale * instance.scale;
-    sceneOptions.push({
-      path: asset.url,
-      position: [position.x, instance.y + asset.yOffset, position.z],
-      rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
-      scale: [scale, scale, scale],
-    });
-  }
 
   let viewer: import("@mkkellogg/gaussian-splats-3d").DropInViewer | null = null;
-  if (sceneOptions.length > 0) {
+  if ([...availableByUrl.values()].some(Boolean)) {
     try {
       const splats = await import("@mkkellogg/gaussian-splats-3d");
       viewer = new splats.DropInViewer({
@@ -154,16 +141,74 @@ export async function loadClutterVisuals(maze: Maze): Promise<ClutterVisuals> {
         sharedMemoryForWorkers: false,
         dynamicScene: false,
       });
-      await viewer.addSplatScenes(sceneOptions, false);
-      group.add(viewer);
+      const buffersByUrl = new Map<string, import("@mkkellogg/gaussian-splats-3d").SplatBuffer>();
+      await Promise.all(
+        CLUTTER_ASSETS.map(async (asset) => {
+          if (!availableByUrl.get(asset.url)) return;
+          try {
+            const buffer = await viewer!.viewer.downloadSplatSceneToSplatBuffer(
+              asset.url,
+              1,
+              undefined,
+              false,
+              undefined,
+              splats.SceneFormat.Splat,
+            );
+            buffersByUrl.set(asset.url, buffer);
+          } catch (error) {
+            availableByUrl.set(asset.url, false);
+            console.warn(
+              `Clutter splat failed to parse for ${asset.url}; using fallback meshes.`,
+              error,
+            );
+          }
+        }),
+      );
+
+      const instanceBuffers: import("@mkkellogg/gaussian-splats-3d").SplatBuffer[] = [];
+      for (let index = 0; index < maze.clutter.length; index += 1) {
+        const instance = maze.clutter[index];
+        const asset = CLUTTER_ASSET_BY_ID.get(instance.assetId);
+        const buffer = asset ? buffersByUrl.get(asset.url) : undefined;
+        if (!asset || !buffer || !selected.has(index)) {
+          fallbackIndexes.push(index);
+          continue;
+        }
+        const position = gridToWorld(maze, instance);
+        const rotation = instanceRotation(asset, instance);
+        const scale = asset.splatScale * instance.scale;
+        instanceBuffers.push(buffer);
+        transforms.push({
+          position: [position.x, instance.y + asset.yOffset, position.z],
+          rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
+          scale: [scale, scale, scale],
+        });
+      }
+      if (instanceBuffers.length > 0) {
+        await viewer.viewer.addSplatBuffers(
+          instanceBuffers,
+          transforms,
+          true,
+          false,
+          false,
+          false,
+          false,
+        );
+        group.add(viewer);
+      } else {
+        viewer.dispose();
+        viewer = null;
+      }
     } catch (error) {
       console.warn("Clutter splat batch failed to load; using fallback meshes.", error);
       viewer?.dispose();
       viewer = null;
       fallbackIndexes.push(
-        ...maze.clutter.map((_, index) => index).filter((index) => selected.has(index)),
+        ...maze.clutter.map((_, index) => index),
       );
     }
+  } else {
+    fallbackIndexes.push(...maze.clutter.map((_, index) => index));
   }
 
   const uniqueFallbackIndexes = [...new Set(fallbackIndexes)].sort(

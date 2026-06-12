@@ -39,7 +39,7 @@ test("two peers create, join, and start a host-authoritative game", async ({ con
 });
 
 test("development host can start a solo enemy chase session", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?debug=1");
@@ -62,6 +62,18 @@ test("development host can start a solo enemy chase session", async ({ page }) =
       { timeout: 20_000 },
     )
     .toBe("splat");
+  await expect
+    .poll(
+      () => page.getByLabel("Enemy third person view").getAttribute("data-clutter-visual"),
+      { timeout: 40_000 },
+    )
+    .toBe("splat");
+  const clutterMaxFrameGapMs = Number(
+    await page
+      .getByLabel("Enemy third person view")
+      .getAttribute("data-clutter-max-frame-gap-ms"),
+  );
+  expect(clutterMaxFrameGapMs).toBeLessThanOrEqual(2_000);
   await page.keyboard.press("KeyV");
   await expect(page.getByLabel("First person game view")).toBeVisible();
   const positionText = async () =>

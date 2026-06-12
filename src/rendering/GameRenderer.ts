@@ -154,13 +154,29 @@ export class GameRenderer {
   }
 
   private async attachClutter(): Promise<void> {
+    const startedAt = performance.now();
+    let previousFrame = startedAt;
+    let maximumFrameGap = 0;
+    let monitorFrame: number;
+    const monitorLoad = (now: number) => {
+      maximumFrameGap = Math.max(maximumFrameGap, now - previousFrame);
+      previousFrame = now;
+      monitorFrame = requestAnimationFrame(monitorLoad);
+    };
+    monitorFrame = requestAnimationFrame(monitorLoad);
     const visuals = await loadClutterVisuals(this.maze);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    cancelAnimationFrame(monitorFrame);
     if (this.disposed) {
       visuals.dispose();
       return;
     }
     this.clutterVisuals = visuals;
     this.canvas.dataset.clutterVisual = visuals.status;
+    this.canvas.dataset.clutterLoadMs = Math.round(
+      performance.now() - startedAt,
+    ).toString();
+    this.canvas.dataset.clutterMaxFrameGapMs = Math.round(maximumFrameGap).toString();
     this.scene.add(visuals.object);
   }
 

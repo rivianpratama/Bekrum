@@ -34,7 +34,7 @@ export const GAME_CONFIG = {
     colliderShrink: 0.85,
     sealedPocketChance: 0.04,
     maxSealedPockets: 2,
-    maxSplatsPerAsset: 20_000,
+    maxSplatsPerAsset: 2_500,
     archetypeWeights: {
       empty: 0.18,
       sparse: 0.34,
