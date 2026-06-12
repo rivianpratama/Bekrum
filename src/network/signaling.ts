@@ -39,8 +39,26 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? "Coordination request failed.");
+  const text = await response.text();
+  let result: unknown;
+  try {
+    result = text ? JSON.parse(text) : null;
+  } catch {
+    if (!response.ok) {
+      throw new Error(text.trim() || `Coordination request failed (${response.status}).`);
+    }
+    throw new Error("Coordination service returned an invalid response.");
+  }
+  if (!response.ok) {
+    const error =
+      result &&
+      typeof result === "object" &&
+      "error" in result &&
+      typeof result.error === "string"
+        ? result.error
+        : `Coordination request failed (${response.status}).`;
+    throw new Error(error);
+  }
   return result as T;
 }
 
