@@ -11,6 +11,9 @@ interface Peer {
   realtime?: RTCDataChannel;
 }
 
+const SIGNAL_POLL_INTERVAL_MS = 450;
+const HOST_HEARTBEAT_INTERVAL_MS = 5_000;
+
 export class PeerNetwork {
   private peers = new Map<string, Peer>();
   private pollingTimer = 0;
@@ -31,15 +34,19 @@ export class PeerNetwork {
   async start(): Promise<void> {
     this.stopped = false;
     await this.poll();
-    this.pollingTimer = window.setInterval(() => void this.poll(), 450);
-    this.heartbeatTimer = window.setInterval(() => void this.syncRoster(), 2_000);
-    if (!this.isHost) await pushSignal(this.session, this.session.hostId, { type: "join" });
+    if (this.isHost) {
+      await this.syncRoster();
+      this.scheduleHeartbeat();
+    } else {
+      await pushSignal(this.session, this.session.hostId, { type: "join" });
+      this.schedulePoll();
+    }
   }
 
   stop(): void {
     this.stopped = true;
-    window.clearInterval(this.pollingTimer);
-    window.clearInterval(this.heartbeatTimer);
+    window.clearTimeout(this.pollingTimer);
+    window.clearTimeout(this.heartbeatTimer);
     for (const timer of this.disconnectTimers.values()) window.clearTimeout(timer);
     this.disconnectTimers.clear();
     for (const peer of this.peers.values()) peer.connection.close();
@@ -74,6 +81,42 @@ export class PeerNetwork {
     } catch {
       // DataChannel heartbeat remains authoritative once connected.
     }
+  }
+
+  private signalingNeeded(): boolean {
+    if (this.isHost) {
+      return [...this.peers.values()].some(
+        (peer) =>
+          peer.connection.connectionState !== "connected" ||
+          peer.control?.readyState !== "open",
+      );
+    }
+    const host = this.peers.get(this.session.hostId);
+    return (
+      !host ||
+      host.connection.connectionState !== "connected" ||
+      host.control?.readyState !== "open"
+    );
+  }
+
+  private schedulePoll(delay = SIGNAL_POLL_INTERVAL_MS): void {
+    window.clearTimeout(this.pollingTimer);
+    this.pollingTimer = 0;
+    if (this.stopped || !this.signalingNeeded()) return;
+    this.pollingTimer = window.setTimeout(() => {
+      this.pollingTimer = 0;
+      void this.poll().finally(() => this.schedulePoll());
+    }, delay);
+  }
+
+  private scheduleHeartbeat(): void {
+    window.clearTimeout(this.heartbeatTimer);
+    this.heartbeatTimer = 0;
+    if (this.stopped || !this.isHost) return;
+    this.heartbeatTimer = window.setTimeout(() => {
+      this.heartbeatTimer = 0;
+      void this.syncRoster().finally(() => this.scheduleHeartbeat());
+    }, HOST_HEARTBEAT_INTERVAL_MS);
   }
 
   private async poll(): Promise<void> {
@@ -125,6 +168,7 @@ export class PeerNetwork {
           }, 8_000),
         );
       }
+      this.schedulePoll(state === "connected" ? SIGNAL_POLL_INTERVAL_MS : 0);
     };
     connection.ondatachannel = (event) => this.attachChannel(peerId, peer, event.channel);
     return peer;
@@ -137,11 +181,15 @@ export class PeerNetwork {
       const message = decodeMessage(String(event.data));
       if (message) this.onMessage(peerId, message);
     };
-    channel.onopen = () => this.onStatus(peerId, "connected");
+    channel.onopen = () => {
+      this.onStatus(peerId, "connected");
+      this.schedulePoll();
+    };
   }
 
   private async createOffer(peerId: string): Promise<void> {
     const peer = await this.createConnection(peerId);
+    this.schedulePoll(0);
     if (peer.connection.signalingState !== "stable" || peer.control) return;
     this.attachChannel(peerId, peer, peer.connection.createDataChannel("control", { ordered: true }));
     this.attachChannel(
