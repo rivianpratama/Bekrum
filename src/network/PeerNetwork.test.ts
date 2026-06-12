@@ -40,17 +40,56 @@ describe("PeerNetwork coordination cadence", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps an idle host alive without continuous signal polling", async () => {
+  it("uses low-frequency discovery polling while keeping an idle host alive", async () => {
     const network = new PeerNetwork(hostSession, vi.fn(), vi.fn());
     await network.start();
 
     expect(pollSignals).toHaveBeenCalledTimes(1);
     expect(heartbeat).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(10_100);
+    await vi.advanceTimersByTimeAsync(15_100);
 
-    expect(pollSignals).toHaveBeenCalledTimes(1);
-    expect(heartbeat).toHaveBeenCalledTimes(3);
+    expect(pollSignals).toHaveBeenCalledTimes(8);
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    network.stop();
+  });
+
+  it("discovers a remote join signal while the host is idle", async () => {
+    vi.mocked(pollSignals)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { id: "join-1", senderId: "client", data: { type: "join" } },
+      ]);
+    class MockPeerConnection {
+      connectionState: RTCPeerConnectionState = "new";
+      signalingState: RTCSignalingState = "stable";
+      remoteDescription: RTCSessionDescription | null = null;
+      onicecandidate: RTCPeerConnection["onicecandidate"] = null;
+      onconnectionstatechange: RTCPeerConnection["onconnectionstatechange"] = null;
+      ondatachannel: RTCPeerConnection["ondatachannel"] = null;
+      createDataChannel = vi.fn(() => ({
+        readyState: "connecting",
+        send: vi.fn(),
+        onmessage: null,
+        onopen: null,
+      }));
+      createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: "offer-sdp" });
+      setLocalDescription = vi.fn().mockResolvedValue(undefined);
+      setRemoteDescription = vi.fn().mockResolvedValue(undefined);
+      addIceCandidate = vi.fn().mockResolvedValue(undefined);
+      close = vi.fn();
+    }
+    vi.stubGlobal("RTCPeerConnection", MockPeerConnection);
+    const network = new PeerNetwork(hostSession, vi.fn(), vi.fn());
+    await network.start();
+
+    await vi.advanceTimersByTimeAsync(2_100);
+
+    expect(pushSignal).toHaveBeenCalledWith(
+      hostSession,
+      "client",
+      { type: "offer", sdp: { type: "offer", sdp: "offer-sdp" } },
+    );
     network.stop();
   });
 

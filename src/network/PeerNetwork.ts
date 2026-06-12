@@ -9,10 +9,12 @@ interface Peer {
   connection: RTCPeerConnection;
   control?: RTCDataChannel;
   realtime?: RTCDataChannel;
+  pendingCandidates: RTCIceCandidateInit[];
 }
 
 const SIGNAL_POLL_INTERVAL_MS = 450;
-const HOST_HEARTBEAT_INTERVAL_MS = 5_000;
+const HOST_DISCOVERY_POLL_INTERVAL_MS = 2_000;
+const HOST_HEARTBEAT_INTERVAL_MS = 15_000;
 
 export class PeerNetwork {
   private peers = new Map<string, Peer>();
@@ -36,6 +38,7 @@ export class PeerNetwork {
     await this.poll();
     if (this.isHost) {
       await this.syncRoster();
+      this.schedulePoll(HOST_DISCOVERY_POLL_INTERVAL_MS);
       this.scheduleHeartbeat();
     } else {
       await pushSignal(this.session, this.session.hostId, { type: "join" });
@@ -102,11 +105,15 @@ export class PeerNetwork {
   private schedulePoll(delay = SIGNAL_POLL_INTERVAL_MS): void {
     window.clearTimeout(this.pollingTimer);
     this.pollingTimer = 0;
-    if (this.stopped || !this.signalingNeeded()) return;
+    if (this.stopped) return;
+    const signalingNeeded = this.signalingNeeded();
+    if (!signalingNeeded && !this.isHost) return;
+    const nextDelay =
+      signalingNeeded ? delay : Math.max(delay, HOST_DISCOVERY_POLL_INTERVAL_MS);
     this.pollingTimer = window.setTimeout(() => {
       this.pollingTimer = 0;
       void this.poll().finally(() => this.schedulePoll());
-    }, delay);
+    }, nextDelay);
   }
 
   private scheduleHeartbeat(): void {
@@ -127,10 +134,16 @@ export class PeerNetwork {
         if (data.type === "join" && this.isHost) await this.createOffer(signal.senderId);
         if (data.type === "offer" && data.sdp) await this.acceptOffer(signal.senderId, data.sdp);
         if (data.type === "answer" && data.sdp) {
-          await this.peers.get(signal.senderId)?.connection.setRemoteDescription(data.sdp);
+          const peer = this.peers.get(signal.senderId);
+          if (peer) await this.setRemoteDescription(peer, data.sdp);
         }
         if (data.type === "candidate" && data.candidate) {
-          await this.peers.get(signal.senderId)?.connection.addIceCandidate(data.candidate);
+          const peer = await this.createConnection(signal.senderId);
+          if (peer.connection.remoteDescription) {
+            await peer.connection.addIceCandidate(data.candidate);
+          } else {
+            peer.pendingCandidates.push(data.candidate);
+          }
         }
       }
     } catch {
@@ -142,7 +155,7 @@ export class PeerNetwork {
     const existing = this.peers.get(peerId);
     if (existing) return existing;
     const connection = new RTCPeerConnection({ iceServers: await getIceServers() });
-    const peer: Peer = { connection };
+    const peer: Peer = { connection, pendingCandidates: [] };
     this.peers.set(peerId, peer);
     connection.onicecandidate = (event) => {
       if (event.candidate) {
@@ -204,9 +217,20 @@ export class PeerNetwork {
 
   private async acceptOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void> {
     const peer = await this.createConnection(peerId);
-    await peer.connection.setRemoteDescription(offer);
+    await this.setRemoteDescription(peer, offer);
     const answer = await peer.connection.createAnswer();
     await peer.connection.setLocalDescription(answer);
     await pushSignal(this.session, peerId, { type: "answer", sdp: answer });
+  }
+
+  private async setRemoteDescription(
+    peer: Peer,
+    description: RTCSessionDescriptionInit,
+  ): Promise<void> {
+    await peer.connection.setRemoteDescription(description);
+    const candidates = peer.pendingCandidates.splice(0);
+    for (const candidate of candidates) {
+      await peer.connection.addIceCandidate(candidate);
+    }
   }
 }
