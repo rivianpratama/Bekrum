@@ -3,8 +3,9 @@ import { GameView } from "./game/GameView";
 import { generateMaze } from "./maze/generateMaze";
 import { PeerNetwork } from "./network/PeerNetwork";
 import { createRoom, joinRoom, type RoomSession } from "./network/signaling";
+import { MAP_SIZE_DIMENSIONS } from "./shared/config";
 import { Opcode, type ProtocolMessage } from "./shared/protocol";
-import type { MazeDescriptor, PlayerState } from "./shared/types";
+import type { MapSize, MazeDescriptor, PlayerState } from "./shared/types";
 import { Lobby } from "./ui/Lobby";
 
 function supportsGame(): boolean {
@@ -20,6 +21,7 @@ export default function App() {
   const [network, setNetwork] = useState<PeerNetwork | null>(null);
   const [players, setPlayers] = useState<PlayerState[]>([]);
   const [descriptor, setDescriptor] = useState<MazeDescriptor | null>(null);
+  const [mapSize, setMapSize] = useState<MapSize>("large");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(supportsGame() ? "" : "This browser lacks WebRTC, WebGL2, or Pointer Lock.");
   const handlerRef = useRef<(senderId: string, message: ProtocolMessage) => void>(() => undefined);
@@ -127,7 +129,12 @@ export default function App() {
 
   const handleStart = () => {
     if (!network || (players.length < 2 && !allowSoloDebug)) return;
-    const maze = generateMaze(Math.floor(Math.random() * 2_147_483_647));
+    const dimension = MAP_SIZE_DIMENSIONS[mapSize];
+    const maze = generateMaze(
+      Math.floor(Math.random() * 2_147_483_647),
+      dimension,
+      dimension,
+    );
     network.send([Opcode.PREPARE_GAME, maze.descriptor]);
     window.setTimeout(() => network.send([Opcode.GAME_START, performance.now()]), 400);
     setDescriptor(maze.descriptor);
@@ -165,12 +172,14 @@ export default function App() {
       players={players}
       isHost={network?.isHost ?? false}
       allowSoloDebug={allowSoloDebug}
+      mapSize={mapSize}
       busy={busy}
       error={error}
       onName={setName}
       onCode={setCode}
       onCreate={handleCreate}
       onJoin={handleJoin}
+      onMapSize={setMapSize}
       onStart={handleStart}
     />
   );

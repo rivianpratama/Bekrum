@@ -32,7 +32,9 @@ export function GameView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [locked, setLocked] = useState(false);
+  const [entityCamera, setEntityCamera] = useState(false);
   const isHost = network.isHost;
+  const entityCameraAvailable = import.meta.env.DEV;
   const maze = useMemo(
     () => generateMaze(descriptor.seed, descriptor.width, descriptor.height),
     [descriptor.height, descriptor.seed, descriptor.width],
@@ -57,12 +59,18 @@ export function GameView({
     let snapshotAccumulator = 0;
     let frame = 0;
     let clientIntent: InputIntent | null = null;
+    let viewingEntity = false;
 
     const applySnapshot = (nextSnapshot: GameSnapshot, updateUi: boolean) => {
       renderer.setSnapshot(nextSnapshot, input.pitch);
+      const localPlayer = nextSnapshot.players.find((player) => player.id === localPlayerId);
       audio.setAggro(
-        nextSnapshot.enemy.mode === "chase" &&
+        (nextSnapshot.enemy.mode === "chase" || nextSnapshot.enemy.mode === "attack") &&
           nextSnapshot.enemy.targetId === localPlayerId,
+      );
+      audio.updateFootsteps(
+        localPlayer?.position ?? null,
+        localPlayer?.life === "alive" && nextSnapshot.phase === "playing",
       );
       if (updateUi) setSnapshot(nextSnapshot);
     };
@@ -79,7 +87,15 @@ export function GameView({
     });
 
     const onPointerLock = () => setLocked(document.pointerLockElement === canvas);
+    const onCameraToggle = (event: KeyboardEvent) => {
+      if (!entityCameraAvailable || event.code !== "KeyV" || event.repeat) return;
+      event.preventDefault();
+      viewingEntity = !viewingEntity;
+      renderer.setEntityCamera(viewingEntity);
+      setEntityCamera(viewingEntity);
+    };
     document.addEventListener("pointerlockchange", onPointerLock);
+    window.addEventListener("keydown", onCameraToggle);
     canvas.addEventListener("click", () => {
       input.lock();
       audio.start();
@@ -118,11 +134,22 @@ export function GameView({
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener("pointerlockchange", onPointerLock);
+      window.removeEventListener("keydown", onCameraToggle);
       input.dispose();
       renderer.dispose();
       audio.dispose();
     };
-  }, [descriptor.hash, isHost, localPlayerId, maze, network, players, setMessageHandler, soloDebug]);
+  }, [
+    descriptor.hash,
+    entityCameraAvailable,
+    isHost,
+    localPlayerId,
+    maze,
+    network,
+    players,
+    setMessageHandler,
+    soloDebug,
+  ]);
 
   const local = snapshot?.players.find((player) => player.id === localPlayerId);
   const grouped = (snapshot?.proximityFactor ?? 0) >= 0.9;
@@ -138,8 +165,16 @@ export function GameView({
 
   return (
     <main className="game-shell">
-      <canvas ref={canvasRef} className="game-canvas" aria-label="First person game view" />
-      <div className={`vignette ${snapshot?.enemy.mode === "chase" ? "is-aggro" : ""}`} />
+      <canvas
+        ref={canvasRef}
+        className="game-canvas"
+        aria-label={entityCamera ? "Enemy third person view" : "First person game view"}
+      />
+      <div
+        className={`vignette ${
+          snapshot?.enemy.mode === "chase" || snapshot?.enemy.mode === "attack" ? "is-aggro" : ""
+        }`}
+      />
       <div className="crosshair" aria-hidden="true" />
       <div className="hud-top">
         <span>OBJECTIVE</span>
@@ -155,7 +190,15 @@ export function GameView({
           <strong>{Math.round((snapshot?.enemy.scale ?? 1) * 100)}%</strong>
         </div>
       </div>
-      {snapshot?.enemy.mode === "chase" ? <div className="aggro-alert">IT SEES YOU</div> : null}
+      {snapshot?.enemy.mode === "chase" || snapshot?.enemy.mode === "attack" ? (
+        <div className="aggro-alert">IT SEES YOU</div>
+      ) : null}
+      {entityCameraAvailable ? (
+        <div className={`camera-mode ${entityCamera ? "is-entity" : ""}`}>
+          <span>{entityCamera ? "ENTITY CAMERA" : "PLAYER CAMERA"}</span>
+          <strong><kbd>V</kbd> TOGGLE VIEW</strong>
+        </div>
+      ) : null}
       {stompReady ? (
         <div className="stomp-prompt">
           HOLD <kbd>E</kbd> TO STOMP
@@ -176,14 +219,23 @@ export function GameView({
             `seed ${descriptor.seed}`,
             `maze ${descriptor.hash}`,
             `players ${snapshot.players.length}`,
+            `phase ${snapshot.phase}`,
+            `life ${local?.life ?? "missing"}`,
+            `camera ${entityCamera ? "entity" : "player"}`,
             `enemy ${snapshot.enemy.mode} ${snapshot.enemy.scale.toFixed(2)}`,
+            `range ${local ? distance(local.position, snapshot.enemy.position).toFixed(1) : "-"}`,
+            `you ${local ? `${local.position.x.toFixed(1)},${local.position.z.toFixed(1)}` : "-"}`,
+            `entity ${snapshot.enemy.position.x.toFixed(1)},${snapshot.enemy.position.z.toFixed(1)}`,
           ].join("\n")}
         </pre>
       ) : null}
       {!locked && !result ? (
         <button className="pointer-lock" onClick={() => canvasRef.current?.click()}>
           CLICK TO ENTER
-          <small>WASD MOVE · SHIFT RUN · MOUSE LOOK · E STOMP</small>
+          <small>
+            WASD MOVE · SHIFT RUN · MOUSE LOOK · E STOMP
+            {entityCameraAvailable ? " · V ENTITY VIEW" : ""}
+          </small>
         </button>
       ) : null}
       {result ? (

@@ -1,7 +1,7 @@
 # BEKRUM
 
 BEKRUM is a lean browser-based cooperative horror prototype. Two to six players enter the
-same seeded yellow-office maze, stay close enough to shrink a hunting entity, then hold
+same seeded, distorted yellow office floor, stay close enough to shrink a hunting entity, then hold
 `E` together within stomp range to clear the match.
 
 ## Architecture
@@ -15,15 +15,15 @@ same seeded yellow-office maze, stay close enough to shrink a hunting entity, th
   offers, answers, and ICE candidates. No gameplay state is stored there.
 - **Local development:** If the coordination API is unavailable, tabs on the same origin
   use `BroadcastChannel` only to bootstrap WebRTC. Gameplay still uses DataChannels.
-- **World:** Every peer reconstructs a deterministic maze from the host seed and verifies
-  its FNV-1a topology hash before entering.
+- **World:** Every peer reconstructs a deterministic room-first office floor from the host
+  seed and verifies its FNV-1a topology hash before entering.
 
 The main boundaries are:
 
 ```text
 src/shared       protocol, types, tuning
 src/network      room bootstrap and WebRTC
-src/maze         seeded topology and coordinates
+src/maze         seeded office topology and coordinates
 src/simulation   movement, collision, rules, host simulation
 src/enemy        host AI and pathfinding
 src/rendering    Three.js scene and interpolation
@@ -39,8 +39,8 @@ api              disposable Vercel/Upstash coordination
 1. The host creates a six-character invite code.
 2. Peers join and signal the host through disposable HTTP-polled messages.
 3. The host creates one WebRTC connection per peer.
-4. The host starts with a random maze seed and broadcasts the descriptor.
-5. Clients regenerate and hash the maze. Gameplay traffic then remains peer-to-peer.
+4. The host starts with a random floor seed and broadcasts the descriptor.
+5. Clients regenerate and hash the office layout. Gameplay traffic then remains peer-to-peer.
 6. Clients send compact input intents at 20 Hz. The host simulates at 20 Hz and sends
    snapshots at 10 Hz.
 
@@ -58,6 +58,31 @@ Reliable control messages cover `HELLO`, `WELCOME`, `ROSTER`, `PREPARE_GAME`,
 
 The unordered real-time channel carries `PLAYER_INPUT` and authoritative `SNAPSHOT`
 messages. Values are intentionally small and the room cap is six.
+
+## Office Floor Generation
+
+The default floor is approximately 300 by 300 meters and contains about 50 recursively
+subdivided office zones. Thin architectural partitions, offset wide openings, partial
+dividers, counters, and pillars interrupt sightlines without carving narrow maze corridors.
+Six spawn candidates are selected from different zones using navigation distance, with a
+default minimum separation target of 90 meters.
+
+Generation is deterministic and configured in `src/shared/config.ts`: floor dimensions,
+major zone count and size, connector width, partition and pillar density, openness,
+occlusion, repetition, and spawn separation are all explicit tuning points. The existing
+`MazeDescriptor` and protocol opcode names are retained as internal compatibility names.
+
+The host alone runs enemy decisions. Full-height walls, pillars, and sufficiently tall
+dividers block enemy sight. After losing sight of a player, the enemy follows the last seen
+position for four seconds before returning to zone-based search.
+
+Fluorescent ambience and carpet footsteps are generated with Web Audio after the player
+enters pointer lock. Footstep cadence follows authoritative movement distance and becomes
+quicker and heavier while running; no external sound asset is required.
+
+Development builds can press `V` during a match to toggle a local third-person camera
+behind the entity. The camera follows its authoritative position and facing direction
+without changing simulation or network state. This control is absent from production builds.
 
 ## Game Rules
 
@@ -81,10 +106,28 @@ Place the supplied model at:
 public/assets/enemy.splat
 ```
 
+The repository includes a converter for INRIA Gaussian PLY files:
+
+```bash
+npm run convert:enemy
+```
+
+By default it converts `src/assets/enemy.ply` to `public/assets/enemy.splat`, removes
+effectively invisible splats, and sorts the remaining splats by visual importance. Custom
+paths can be passed directly:
+
+```bash
+node scripts/convert-ply-to-splat.mjs input.ply output.splat
+```
+
 The visual is loaded lazily through `@mkkellogg/gaussian-splats-3d`. AI, collision, and
 network state do not depend on splat rendering. A dark mesh entity is used when loading
 fails, so the match remains playable. The adapter also provides the ownership boundary
 for adding a PLY loader without changing simulation code.
+
+The bundled splat is normalized visually to roughly human height and lifted above the
+floor. During development, the game canvas exposes `data-enemy-visual="splat"` or
+`"fallback"` for quick loader diagnosis.
 
 ## Development
 

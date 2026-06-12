@@ -18,7 +18,15 @@ describe("GameSimulation solo debug", () => {
     const simulation = new GameSimulation(generateMaze(123), [soloPlayer], true);
     simulation.update(1 / 20);
     expect(simulation.phase).toBe("playing");
-    expect(simulation.enemy.targetId).toBe("host");
+    expect(simulation.enemy.mode).toBe("roam");
+    expect(simulation.enemy.targetId).toBeNull();
+  });
+
+  it("does not let the enemy reach an idle solo player during the initial safety window", () => {
+    const simulation = new GameSimulation(generateMaze(456), [soloPlayer], true);
+    for (let tick = 0; tick < 200; tick += 1) simulation.update(1 / 20);
+    expect(simulation.phase).toBe("playing");
+    expect(simulation.players.get("host")?.life).toBe("alive");
   });
 
   it("keeps the normal two-player minimum", () => {

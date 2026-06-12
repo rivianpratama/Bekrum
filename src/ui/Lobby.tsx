@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import type { PlayerState } from "../shared/types";
+import type { MapSize, PlayerState } from "../shared/types";
 
 interface LobbyProps {
   screen: "home" | "waiting";
@@ -9,12 +9,14 @@ interface LobbyProps {
   players: PlayerState[];
   isHost: boolean;
   allowSoloDebug: boolean;
+  mapSize: MapSize;
   busy: boolean;
   error: string;
   onName: (value: string) => void;
   onCode: (value: string) => void;
   onCreate: () => void;
   onJoin: () => void;
+  onMapSize: (value: MapSize) => void;
   onStart: () => void;
 }
 
@@ -59,6 +61,19 @@ export function Lobby(props: LobbyProps) {
               </div>
             ))}
           </div>
+          {props.isHost ? (
+            <label className="map-size-field">
+              MAP SIZE
+              <select
+                value={props.mapSize}
+                onChange={(event) => props.onMapSize(event.target.value as MapSize)}
+              >
+                <option value="small">SMALL - 71 x 71</option>
+                <option value="medium">MEDIUM - 111 x 111</option>
+                <option value="large">LARGE - 151 x 151</option>
+              </select>
+            </label>
+          ) : null}
           <footer>
             <p>
               {props.players.length}/6 CONNECTED

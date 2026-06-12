@@ -99,6 +99,7 @@ label,
 }
 
 input,
+select,
 .entry-panel button,
 .waiting-panel footer button,
 .result-screen button {
@@ -119,7 +120,21 @@ input {
   outline: none;
 }
 
-input:focus {
+select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(232, 226, 176, 0.3);
+  border-radius: 0;
+  outline: none;
+  color: var(--paper);
+  background: #10110e;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+input:focus,
+select:focus {
   border-color: var(--yellow);
 }
 
@@ -279,6 +294,13 @@ input:focus {
   opacity: 0.33;
 }
 
+.map-size-field {
+  grid-template-columns: auto minmax(190px, 240px);
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 18px;
+}
+
 .waiting-panel footer {
   display: grid;
   grid-template-columns: 1fr 220px;
@@ -329,6 +351,7 @@ input:focus {
 .hud-top,
 .hud-status,
 .aggro-alert,
+.camera-mode,
 .stomp-prompt,
 .ghost-message {
   position: absolute;
@@ -380,34 +403,12 @@ input:focus {
   color: #77745e;
 }
 
-.solo-map svg {
+.solo-map canvas {
   display: block;
   width: 100%;
+  aspect-ratio: 1;
   border: 1px solid #34352a;
   image-rendering: pixelated;
-}
-
-.solo-map__background,
-.solo-map__wall {
-  fill: #0b0c09;
-}
-
-.solo-map__floor {
-  fill: #777044;
-  stroke: #514c30;
-  stroke-width: 0.25;
-}
-
-.solo-map__enemy {
-  fill: #e34c2d;
-  stroke: #ffd1c7;
-  stroke-width: 1.2;
-}
-
-.solo-map__player {
-  fill: #e3d95d;
-  stroke: #fff9ba;
-  stroke-width: 0.9;
 }
 
 .solo-map__legend {
@@ -488,6 +489,35 @@ input:focus {
   letter-spacing: 0.22em;
   transform: translateX(-50%);
   animation: flicker 0.55s infinite alternate;
+}
+
+.camera-mode {
+  top: 28px;
+  left: 50%;
+  display: grid;
+  gap: 5px;
+  color: #8f8b70;
+  font-size: 8px;
+  letter-spacing: 0.13em;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.camera-mode span {
+  color: #c8c18e;
+}
+
+.camera-mode.is-entity span {
+  color: #ff7257;
+}
+
+.camera-mode strong {
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.aggro-alert + .camera-mode {
+  top: 54px;
 }
 
 .stomp-prompt {
@@ -608,6 +638,10 @@ kbd {
 
   .waiting-panel header p {
     display: none;
+  }
+
+  .map-size-field {
+    grid-template-columns: 1fr;
   }
 
   .entry-panel form {

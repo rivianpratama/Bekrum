@@ -41,21 +41,23 @@ export async function loadEnemyVisual(url = "/assets/enemy.splat"): Promise<Enem
     }
     const splats = await import("@mkkellogg/gaussian-splats-3d");
     const viewer = new splats.DropInViewer({
-      gpuAcceleratedSort: true,
+      gpuAcceleratedSort: false,
       sharedMemoryForWorkers: false,
+      dynamicScene: true,
     });
     await viewer.addSplatScene(url, {
       showLoadingUI: false,
-      position: [0, 0, 0],
-      rotation: [0, 0, 0, 1],
-      scale: [1, 1, 1],
+      position: [0, 1.2, 0],
+      rotation: [Math.SQRT1_2, 0, Math.SQRT1_2, 0],
+      scale: [3, 3, 3],
     });
     return {
       object: viewer,
       usedFallback: false,
       dispose: () => viewer.dispose(),
     };
-  } catch {
+  } catch (error) {
+    console.warn("Enemy splat failed to load; using fallback mesh.", error);
     return fallbackEnemy();
   }
 }

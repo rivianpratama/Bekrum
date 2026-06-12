@@ -1,19 +1,22 @@
 import * as THREE from "three";
 import { loadEnemyVisual, type EnemyVisual } from "../assets/EnemyVisual";
-import { cellToWorld, type Maze } from "../maze/generateMaze";
+import { gridToWorld, type Maze, type OfficeFeatureKind } from "../maze/generateMaze";
 import { GAME_CONFIG } from "../shared/config";
 import type { GameSnapshot } from "../shared/types";
 
 export class GameRenderer {
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(72, 1, 0.05, 80);
+  private readonly camera = new THREE.PerspectiveCamera(72, 1, 0.05, 180);
   private readonly renderer: THREE.WebGLRenderer;
   private readonly playerMeshes = new Map<string, THREE.Mesh>();
   private readonly playerTargets = new Map<string, THREE.Vector2>();
   private readonly cameraTarget = new THREE.Vector3();
   private readonly enemyTarget = new THREE.Vector3();
   private readonly enemyScaleTarget = new THREE.Vector3(1, 1, 1);
+  private readonly entityCameraTarget = new THREE.Vector3();
+  private readonly entityLookTarget = new THREE.Vector3();
   private enemyVisual: EnemyVisual | null = null;
+  private entityCameraEnabled = false;
   private raf = 0;
   private targetSnapshot: GameSnapshot | null = null;
   private lastFrameTime = performance.now();
@@ -33,8 +36,8 @@ export class GameRenderer {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.shadowMap.enabled = false;
-    this.scene.background = new THREE.Color(0x817b55);
-    this.scene.fog = new THREE.Fog(0xb5ad7a, 34, 72);
+    this.scene.background = new THREE.Color(0xd8d0ad);
+    this.scene.fog = new THREE.Fog(0xd8d0ad, 38, 76);
     this.camera.rotation.order = "YXZ";
     this.buildMaze();
     void this.attachEnemy();
@@ -51,6 +54,21 @@ export class GameRenderer {
       if (this.camera.position.lengthSq() === 0) this.camera.position.copy(this.cameraTarget);
       this.setLook(local.yaw, pitch);
     }
+    const enemy = snapshot.enemy;
+    const forwardX = Math.sin(enemy.yaw);
+    const forwardZ = Math.cos(enemy.yaw);
+    const cameraDistance = 4.5 + enemy.scale;
+    this.enemyTarget.set(enemy.position.x, 0, enemy.position.z);
+    this.entityCameraTarget.set(
+      enemy.position.x - forwardX * cameraDistance,
+      2.35 + enemy.scale * 0.45,
+      enemy.position.z - forwardZ * cameraDistance,
+    );
+    this.entityLookTarget.set(
+      enemy.position.x + forwardX * 5,
+      1.15 * enemy.scale,
+      enemy.position.z + forwardZ * 5,
+    );
     for (const player of snapshot.players) {
       if (player.id === this.localPlayerId || player.life === "ghost") continue;
       let mesh = this.playerMeshes.get(player.id);
@@ -75,17 +93,22 @@ export class GameRenderer {
     }
     if (this.enemyVisual) {
       const object = this.enemyVisual.object;
-      object.rotation.y = snapshot.enemy.yaw;
-      const scale = snapshot.enemy.scale;
-      this.enemyTarget.set(snapshot.enemy.position.x, 0, snapshot.enemy.position.z);
+      object.rotation.y = enemy.yaw;
+      const scale = enemy.scale;
       this.enemyScaleTarget.set(scale, scale, scale);
-      object.visible = snapshot.enemy.mode !== "stomped";
+      object.visible = enemy.mode !== "stomped";
     }
   }
 
   setLook(yaw: number, pitch: number): void {
     this.lookYaw = yaw;
     this.lookPitch = pitch;
+  }
+
+  setEntityCamera(enabled: boolean): void {
+    this.entityCameraEnabled = enabled;
+    this.canvas.dataset.cameraMode = enabled ? "entity" : "player";
+    if (enabled) this.camera.position.copy(this.entityCameraTarget);
   }
 
   dispose(): void {
@@ -104,6 +127,7 @@ export class GameRenderer {
 
   private async attachEnemy(): Promise<void> {
     this.enemyVisual = await loadEnemyVisual();
+    this.canvas.dataset.enemyVisual = this.enemyVisual.usedFallback ? "fallback" : "splat";
     if (this.targetSnapshot) {
       const enemy = this.targetSnapshot.enemy;
       this.enemyTarget.set(enemy.position.x, 0, enemy.position.z);
@@ -138,58 +162,59 @@ export class GameRenderer {
     return texture;
   }
 
-  private createCarpetTexture(): THREE.CanvasTexture {
-    const canvas = document.createElement("canvas");
-    canvas.width = 128;
-    canvas.height = 128;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas 2D is required for carpet texture.");
-    context.fillStyle = "#756747";
-    context.fillRect(0, 0, 128, 128);
-    for (let index = 0; index < 650; index += 1) {
-      const x = (index * 43) % 128;
-      const y = (index * 79) % 128;
-      const shade = 48 + ((index * 17) % 45);
-      context.fillStyle = `rgba(${shade}, ${shade - 6}, ${Math.max(20, shade - 20)}, 0.22)`;
-      context.fillRect(x, y, 1 + (index % 2), 1);
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-    texture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
-    return texture;
-  }
-
   private buildMaze(): void {
     const { width, height, cellSize } = this.maze.descriptor;
     const loader = new THREE.TextureLoader();
-    const wallTexture = loader.load("/assets/backrooms-atlas.png");
+    const wallTexture = loader.load("/assets/pale-yellow-surface.png");
     wallTexture.colorSpace = THREE.SRGBColorSpace;
     wallTexture.wrapS = wallTexture.wrapT = THREE.RepeatWrapping;
-    wallTexture.repeat.set(0.5, 1);
-    const carpetTexture = this.createCarpetTexture();
-    carpetTexture.repeat.set(width, height);
+    wallTexture.repeat.set(1, 1);
+    const floorTexture = wallTexture.clone();
+    floorTexture.needsUpdate = true;
+    floorTexture.repeat.set(width, height);
 
-    const wallGeometry = new THREE.BoxGeometry(cellSize, GAME_CONFIG.maze.wallHeight, cellSize);
     wallTexture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
-    const wallMaterial = new THREE.MeshBasicMaterial({ map: wallTexture, color: 0xf4e994 });
-    const wallCount = [...this.maze.cells].filter((cell) => cell === 0).length;
-    const walls = new THREE.InstancedMesh(wallGeometry, wallMaterial, wallCount);
-    const transform = new THREE.Matrix4();
-    let instance = 0;
-    for (let z = 0; z < height; z += 1) {
-      for (let x = 0; x < width; x += 1) {
-        if (this.maze.cells[z * width + x]) continue;
-        const position = cellToWorld(this.maze, { x, z });
-        transform.makeTranslation(position.x, GAME_CONFIG.maze.wallHeight / 2, position.z);
-        walls.setMatrixAt(instance++, transform);
-      }
+    const wallMaterial = new THREE.MeshBasicMaterial({ map: wallTexture, color: 0xd8c77f });
+    const lowMaterial = new THREE.MeshBasicMaterial({ map: wallTexture, color: 0xcbbd7f });
+    const pillarMaterial = new THREE.MeshBasicMaterial({ map: wallTexture, color: 0xcfc17c });
+    const materialFor = (kind: OfficeFeatureKind) =>
+      kind === "wall" ? wallMaterial : kind === "pillar" ? pillarMaterial : lowMaterial;
+    const featureGeometry = new THREE.BoxGeometry(1, 1, 1);
+    const featureGroups = new Map<OfficeFeatureKind, typeof this.maze.features>();
+    for (const feature of this.maze.features) {
+      const group = featureGroups.get(feature.kind) ?? [];
+      group.push(feature);
+      featureGroups.set(feature.kind, group);
     }
-    this.scene.add(walls);
+    for (const [kind, features] of featureGroups) {
+      const mesh = new THREE.InstancedMesh(
+        featureGeometry,
+        materialFor(kind),
+        features.length,
+      );
+      const matrix = new THREE.Matrix4();
+      for (let instance = 0; instance < features.length; instance += 1) {
+        const feature = features[instance];
+        const center = gridToWorld(this.maze, { x: feature.x, z: feature.z });
+        matrix.compose(
+          new THREE.Vector3(center.x, feature.height / 2, center.z),
+          new THREE.Quaternion(),
+          new THREE.Vector3(
+            feature.width * cellSize,
+            feature.height,
+            feature.depth * cellSize,
+          ),
+        );
+        mesh.setMatrixAt(instance, matrix);
+      }
+      mesh.computeBoundingBox();
+      mesh.computeBoundingSphere();
+      this.scene.add(mesh);
+    }
 
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(width * cellSize, height * cellSize),
-      new THREE.MeshBasicMaterial({ map: carpetTexture, color: 0xb9a77a }),
+      new THREE.MeshBasicMaterial({ map: floorTexture, color: 0xeee7c9 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = 0;
@@ -208,26 +233,132 @@ export class GameRenderer {
     ceiling.position.y = GAME_CONFIG.maze.wallHeight;
     this.scene.add(ceiling);
 
-    const lightGeometry = new THREE.PlaneGeometry(1.8, 0.35);
-    const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-    const lightPositions: THREE.Vector3[] = [];
-    for (let z = 1; z < height - 1; z += 4) {
-      for (let x = 1; x < width - 1; x += 4) {
-        if (!this.maze.cells[z * width + x]) continue;
-        const position = cellToWorld(this.maze, { x, z });
-        lightPositions.push(
-          new THREE.Vector3(position.x, GAME_CONFIG.maze.wallHeight - 0.02, position.z),
+    const zoneOffset = (zoneId: number, multiplier: number) =>
+      (((zoneId * multiplier) % 100) / 100) * GAME_CONFIG.maze.ceilingJitter;
+    const latticeCount = (spacing: number) =>
+      this.maze.zones.reduce((count, zone) => {
+        const ox = zoneOffset(zone.id, 7919);
+        const oz = zoneOffset(zone.id, 6151);
+        return (
+          count +
+          Math.floor((zone.width - ox) / spacing) +
+          1 +
+          Math.floor((zone.height - oz) / spacing) +
+          1
         );
+      }, 0);
+    const latticeSpacing = latticeCount(1) > 20_000 ? 2 : 1;
+    const lattice = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({ color: 0xb9b8ad }),
+      latticeCount(latticeSpacing),
+    );
+    const latticeTransform = new THREE.Matrix4();
+    let latticeInstance = 0;
+    for (const zone of this.maze.zones) {
+      const ox = zoneOffset(zone.id, 7919);
+      const oz = zoneOffset(zone.id, 6151);
+      for (
+        let x = zone.x + ox;
+        x <= zone.x + zone.width;
+        x += latticeSpacing
+      ) {
+        const center = gridToWorld(this.maze, {
+          x,
+          z: zone.z + zone.height / 2,
+        });
+        latticeTransform.compose(
+          new THREE.Vector3(center.x, GAME_CONFIG.maze.wallHeight - 0.04, center.z),
+          new THREE.Quaternion(),
+          new THREE.Vector3(0.04, 0.05, zone.height * cellSize),
+        );
+        lattice.setMatrixAt(latticeInstance++, latticeTransform);
+      }
+      for (
+        let z = zone.z + oz;
+        z <= zone.z + zone.height;
+        z += latticeSpacing
+      ) {
+        const center = gridToWorld(this.maze, {
+          x: zone.x + zone.width / 2,
+          z,
+        });
+        latticeTransform.compose(
+          new THREE.Vector3(center.x, GAME_CONFIG.maze.wallHeight - 0.04, center.z),
+          new THREE.Quaternion(),
+          new THREE.Vector3(zone.width * cellSize, 0.05, 0.04),
+        );
+        lattice.setMatrixAt(latticeInstance++, latticeTransform);
       }
     }
-    const panels = new THREE.InstancedMesh(lightGeometry, lightMaterial, lightPositions.length);
-    const panelTransform = new THREE.Matrix4();
-    const panelRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
-    for (let index = 0; index < lightPositions.length; index += 1) {
-      panelTransform.compose(lightPositions[index], panelRotation, new THREE.Vector3(1, 1, 1));
-      panels.setMatrixAt(index, panelTransform);
+    lattice.count = latticeInstance;
+    lattice.computeBoundingBox();
+    lattice.computeBoundingSphere();
+    this.scene.add(lattice);
+
+    const lightGeometry = new THREE.PlaneGeometry(1.8, 0.35);
+    const panels: Array<{ position: THREE.Vector3; rotated: boolean; dimmed: boolean }> = [];
+    for (const zone of this.maze.zones) {
+      const ox = zoneOffset(zone.id, 7919);
+      const oz = zoneOffset(zone.id, 6151);
+      let panelIndex = 0;
+      for (let z = zone.z + oz + 1; z < zone.z + zone.height; z += 3) {
+        for (let x = zone.x + ox + 1; x < zone.x + zone.width; x += 3) {
+          const cellX = Math.floor(x);
+          const cellZ = Math.floor(z);
+          if (!this.maze.cells[cellZ * width + cellX]) {
+            panelIndex += 1;
+            continue;
+          }
+          const hash = Math.imul(zone.id + 1, 73856093) ^ Math.imul(panelIndex + 1, 19349663);
+          const rotationRoll = (hash >>> 0) / 4294967296;
+          const dimRoll = ((Math.imul(hash, 83492791) >>> 0) / 4294967296);
+          const position = gridToWorld(this.maze, { x, z });
+          panels.push({
+            position: new THREE.Vector3(
+              position.x,
+              GAME_CONFIG.maze.wallHeight - 0.02,
+              position.z,
+            ),
+            rotated: rotationRoll < 0.12,
+            dimmed: dimRoll < 0.08,
+          });
+          panelIndex += 1;
+        }
+      }
     }
-    this.scene.add(panels);
+    const addPanels = (dimmed: boolean) => {
+      const selected = panels.filter((panel) => panel.dimmed === dimmed);
+      const mesh = new THREE.InstancedMesh(
+        lightGeometry,
+        new THREE.MeshBasicMaterial({
+          color: dimmed ? 0x9a9a8e : 0xffffff,
+          side: THREE.DoubleSide,
+        }),
+        selected.length,
+      );
+      const panelTransform = new THREE.Matrix4();
+      const horizontal = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0),
+        Math.PI / 2,
+      );
+      for (let panelIndex = 0; panelIndex < selected.length; panelIndex += 1) {
+        const panel = selected[panelIndex];
+        const rotation = new THREE.Quaternion()
+          .setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            panel.rotated ? Math.PI / 2 : 0,
+          )
+          .multiply(horizontal);
+        panelTransform.compose(panel.position, rotation, new THREE.Vector3(1, 1, 1));
+        mesh.setMatrixAt(panelIndex, panelTransform);
+      }
+      mesh.computeBoundingBox();
+      mesh.computeBoundingSphere();
+      this.scene.add(mesh);
+    };
+    addPanels(false);
+    addPanels(true);
   }
 
   private resize = (): void => {
@@ -267,8 +398,13 @@ export class GameRenderer {
     const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05);
     this.lastFrameTime = now;
     const smoothing = 1 - Math.exp(-18 * dt);
-    this.camera.position.lerp(this.cameraTarget, smoothing);
-    this.camera.rotation.set(this.lookPitch, this.lookYaw + Math.PI, 0);
+    if (this.entityCameraEnabled) {
+      this.camera.position.lerp(this.entityCameraTarget, smoothing);
+      this.camera.lookAt(this.entityLookTarget);
+    } else {
+      this.camera.position.lerp(this.cameraTarget, smoothing);
+      this.camera.rotation.set(this.lookPitch, this.lookYaw + Math.PI, 0);
+    }
     for (const [playerId, mesh] of this.playerMeshes) {
       const target = this.playerTargets.get(playerId);
       if (!target) continue;
@@ -279,7 +415,7 @@ export class GameRenderer {
       this.enemyVisual.object.position.lerp(this.enemyTarget, smoothing);
       this.enemyVisual.object.scale.lerp(this.enemyScaleTarget, smoothing);
     }
-    if (this.targetSnapshot?.enemy.mode === "chase") {
+    if (!this.entityCameraEnabled && this.targetSnapshot?.enemy.mode === "chase") {
       this.camera.position.y += Math.sin(now * 0.018) * 0.006;
     }
     this.renderer.render(this.scene, this.camera);

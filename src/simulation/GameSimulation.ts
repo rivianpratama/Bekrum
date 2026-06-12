@@ -1,5 +1,6 @@
+import { createEnemyBrain, type EnemyBrain } from "../enemy/brain";
 import { updateEnemy } from "../enemy/updateEnemy";
-import { cellToWorld, isOpen, type Maze } from "../maze/generateMaze";
+import { cellToWorld, chooseEnemySpawn, isOpen, type Maze } from "../maze/generateMaze";
 import { GAME_CONFIG } from "../shared/config";
 import type { EnemyState, GameSnapshot, InputIntent, PlayerState, RoomPhase } from "../shared/types";
 import { moveWithCollision } from "./collision";
@@ -13,14 +14,18 @@ export class GameSimulation {
   proximityFactor = 0;
   stompProgress = 0;
   private contactTimers = new Map<string, number>();
+  /** Host-only AI memory; never serialized, keeping the host authoritative. */
+  private readonly enemyBrain: EnemyBrain;
 
   constructor(
     readonly maze: Maze,
     initialPlayers: PlayerState[],
     private readonly soloDebug = false,
   ) {
+    const activeSpawnCells: { x: number; z: number }[] = [];
     initialPlayers.forEach((player, index) => {
       const spawnCell = maze.spawnCells[index % maze.spawnCells.length];
+      activeSpawnCells.push(spawnCell);
       const spawn = cellToWorld(maze, spawnCell);
       const facing = [
         { x: 0, z: 1, yaw: 0 },
@@ -36,19 +41,17 @@ export class GameSimulation {
         stompHeld: false,
       });
     });
-    const openCells: { x: number; z: number }[] = [];
-    for (let z = 1; z < maze.descriptor.height - 1; z += 1) {
-      for (let x = 1; x < maze.descriptor.width - 1; x += 1) {
-        if (maze.cells[z * maze.descriptor.width + x]) openCells.push({ x, z });
-      }
-    }
+    const enemySpawn = chooseEnemySpawn(maze, activeSpawnCells);
     this.enemy = {
-      position: cellToWorld(maze, openCells[openCells.length - 1]),
+      position: cellToWorld(maze, enemySpawn),
       yaw: 0,
       scale: 1,
-      mode: "search",
+      mode: "roam",
       targetId: null,
+      lastSeenPosition: null,
+      memoryRemaining: 0,
     };
+    this.enemyBrain = createEnemyBrain(maze.descriptor.seed);
   }
 
   applyInput(playerId: string, input: InputIntent): void {
@@ -77,7 +80,7 @@ export class GameSimulation {
   update(dt: number): void {
     if (this.phase !== "playing") return;
     this.tick += 1;
-    const result = updateEnemy(this.maze, this.enemy, [...this.players.values()], dt);
+    const result = updateEnemy(this.maze, this.enemy, [...this.players.values()], dt, this.enemyBrain);
     Object.assign(this.enemy, result.enemy);
     this.proximityFactor = result.proximityFactor;
 

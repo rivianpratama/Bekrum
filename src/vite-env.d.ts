@@ -7,6 +7,7 @@ declare module "@mkkellogg/gaussian-splats-3d" {
     constructor(options?: {
       gpuAcceleratedSort?: boolean;
       sharedMemoryForWorkers?: boolean;
+      dynamicScene?: boolean;
     });
     addSplatScene(
       url: string,

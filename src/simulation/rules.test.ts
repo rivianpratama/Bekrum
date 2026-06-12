@@ -30,6 +30,8 @@ describe("cooperation rules", () => {
       scale: 0.3,
       mode: "chase",
       targetId: "a",
+      lastSeenPosition: null,
+      memoryRemaining: 0,
     };
     expect(isStompReady([player("a", 1, 0), player("b", -1, 0)], enemy, 1)).toBe(true);
     expect(isStompReady([player("a", 1, 0), player("b", 4, 0)], enemy, 1)).toBe(false);
