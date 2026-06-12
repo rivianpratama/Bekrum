@@ -49,10 +49,30 @@ describe("GameSimulation solo debug", () => {
     expect(simulation.players.get("host")?.life).toBe("alive");
   });
 
-  it("keeps the normal two-player minimum", () => {
+  it("keeps playing while at least one player is alive", () => {
     const simulation = new GameSimulation(generateMaze(123), [soloPlayer]);
     simulation.update(1 / 20);
+    expect(simulation.phase).toBe("playing");
+  });
+
+  it("ends in loss only when all players are downed", () => {
+    const peer: PlayerState = { ...soloPlayer, id: "peer", name: "Peer", isHost: false };
+    const simulation = new GameSimulation(generateMaze(123), [soloPlayer, peer], true);
+    // Down both players manually.
+    simulation.players.set("host", { ...simulation.players.get("host")!, life: "ghost" });
+    simulation.players.set("peer", { ...simulation.players.get("peer")!, life: "ghost" });
+    simulation.update(1 / 20);
     expect(simulation.phase).toBe("lost");
+  });
+
+  it("does not end when only one of two players is downed", () => {
+    const peer: PlayerState = { ...soloPlayer, id: "peer", name: "Peer", isHost: false };
+    const simulation = new GameSimulation(generateMaze(123), [soloPlayer, peer], true);
+    // Down only one player.
+    simulation.players.set("peer", { ...simulation.players.get("peer")!, life: "ghost" });
+    simulation.update(1 / 20);
+    expect(simulation.phase).toBe("playing");
+    expect(simulation.players.get("host")?.life).toBe("alive");
   });
 
   it("moves right and left in the camera-relative direction", () => {
