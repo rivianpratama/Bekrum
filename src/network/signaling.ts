@@ -138,6 +138,7 @@ export async function pollSignals(session: RoomSession): Promise<SignalEnvelope[
 export async function heartbeat(
   session: RoomSession,
   locked?: boolean,
+  activePlayers?: string[],
 ): Promise<Record<string, { name: string }>> {
   if (session.local) {
     return Object.fromEntries(
@@ -147,6 +148,7 @@ export async function heartbeat(
   const result = await post<{ players: Record<string, { name: string }> }>("/api/room/heartbeat", {
     ...session,
     locked,
+    activePlayers,
   });
   return result.players;
 }

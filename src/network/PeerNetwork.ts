@@ -73,7 +73,13 @@ export class PeerNetwork {
 
   private async syncRoster(): Promise<void> {
     try {
-      const roster = await heartbeat(this.session);
+      // Report connected peers so the server can prune stale player entries.
+      const connectedPeers = [...this.peers.entries()]
+        .filter(([, peer]) => peer.connection.connectionState === "connected")
+        .map(([id]) => id);
+      const activePlayers = [this.session.playerId, ...connectedPeers];
+
+      const roster = await heartbeat(this.session, undefined, activePlayers);
       if (!this.isHost) return;
       for (const peerId of Object.keys(roster)) {
         if (peerId !== this.session.playerId && !this.peers.has(peerId)) {

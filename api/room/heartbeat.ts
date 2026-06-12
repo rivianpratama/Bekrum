@@ -11,7 +11,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 401, { error: "Room session expired." });
   }
   if (playerId === room.hostId && typeof req.body?.locked === "boolean") room.locked = req.body.locked;
+
+  // Host can report which players are actually connected so stale entries are pruned.
+  if (playerId === room.hostId && Array.isArray(req.body?.activePlayers)) {
+    const active = new Set<string>(req.body.activePlayers);
+    active.add(room.hostId); // Host is always active.
+    for (const id of Object.keys(room.players)) {
+      if (!active.has(id)) delete room.players[id];
+    }
+  }
+
   room.updatedAt = Date.now();
   await writeRoom(room);
   json(res, 200, { players: room.players, hostId: room.hostId, locked: room.locked });
 }
+
