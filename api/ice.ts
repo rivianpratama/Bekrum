@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { json } from "./_shared.js";
 
-const STUN_FALLBACK: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const STUN_FALLBACK = [{ urls: "stun:stun.l.google.com:19302" }];
 
 export default async function handler(_req: VercelRequest, res: VercelResponse) {
   // Prefer Metered.ca dynamic TURN credentials

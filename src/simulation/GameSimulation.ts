@@ -27,7 +27,7 @@ export class GameSimulation {
   constructor(
     readonly maze: Maze,
     initialPlayers: PlayerState[],
-    private readonly soloDebug = false,
+    readonly soloDebug = false,
     readonly difficulty: Difficulty = "easy",
   ) {
     const activeSpawnCells: { x: number; z: number }[] = [];
