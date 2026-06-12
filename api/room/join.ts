@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { json, normalizeCode, randomId, readRoom, requirePost, writeRoom } from "../_shared";
+import { json, normalizeCode, randomId, readRoom, requirePost, writeRoom } from "../_shared.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requirePost(req, res)) return;

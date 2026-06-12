@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { json } from "./_shared";
+import { json } from "./_shared.js";
 
 export default function handler(_req: VercelRequest, res: VercelResponse) {
   try {

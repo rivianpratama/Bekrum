@@ -8,7 +8,7 @@ import {
   SIGNAL_TTL_SECONDS,
   signalKey,
   redis,
-} from "../_shared";
+} from "../_shared.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requirePost(req, res)) return;
