@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { loadEnemyVisual, type EnemyVisual } from "../assets/EnemyVisual";
+import { loadPlayerVisual, type PlayerVisual } from "../assets/PlayerVisual";
 import { gridToWorld, type Maze, type OfficeFeatureKind } from "../maze/generateMaze";
 import { GAME_CONFIG } from "../shared/config";
 import type { GameSnapshot } from "../shared/types";
@@ -11,6 +12,10 @@ export class GameRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly playerMeshes = new Map<string, THREE.Mesh>();
   private readonly playerTargets = new Map<string, THREE.Vector2>();
+  private playerVisual: PlayerVisual | null = null;
+  private readonly playerVisualSlots = new Map<string, number>();
+  private readonly playerPositions = new Map<string, THREE.Vector2>();
+  private nextPlayerSlot = 0;
   private readonly cameraTarget = new THREE.Vector3();
   private readonly enemyTargets = new Map<string, THREE.Vector3>();
   private readonly enemyScaleTargets = new Map<string, THREE.Vector3>();
@@ -79,25 +84,43 @@ export class GameRenderer {
     }
     for (const player of snapshot.players) {
       if (player.id === this.localPlayerId || player.life === "ghost") continue;
-      let mesh = this.playerMeshes.get(player.id);
-      if (!mesh) {
-        mesh = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.34, 1.05, 4, 8),
-          new THREE.MeshStandardMaterial({ color: player.isHost ? 0xe7d96b : 0xa5ab82, roughness: 1 }),
-        );
-        mesh.position.y = 1;
-        this.playerMeshes.set(player.id, mesh);
-        this.scene.add(mesh);
-      }
+      // Track targets for smooth interpolation
       let target = this.playerTargets.get(player.id);
       if (!target) {
         target = new THREE.Vector2(player.position.x, player.position.z);
         this.playerTargets.set(player.id, target);
-        mesh.position.set(player.position.x, 1, player.position.z);
+        this.playerPositions.set(player.id, target.clone());
       } else {
         target.set(player.position.x, player.position.z);
       }
-      mesh.visible = player.life === "alive";
+      // Assign a player visual slot if using splat visual
+      if (this.playerVisual && !this.playerVisualSlots.has(player.id)) {
+        this.playerVisualSlots.set(player.id, this.nextPlayerSlot++);
+      }
+      const slot = this.playerVisualSlots.get(player.id);
+      if (this.playerVisual && slot !== undefined) {
+        const pos = this.playerPositions.get(player.id) ?? target;
+        this.playerVisual.setPlayer(
+          slot,
+          { x: pos.x, z: pos.y },
+          player.yaw,
+          player.life === "alive",
+        );
+      } else {
+        // Fallback: use capsule meshes if player visual not loaded yet
+        let mesh = this.playerMeshes.get(player.id);
+        if (!mesh) {
+          mesh = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.34, 1.05, 4, 8),
+            new THREE.MeshStandardMaterial({ color: player.isHost ? 0xe7d96b : 0xa5ab82, roughness: 1 }),
+          );
+          mesh.position.y = 1;
+          this.playerMeshes.set(player.id, mesh);
+          this.scene.add(mesh);
+        }
+        mesh.position.set(player.position.x, 1, player.position.z);
+        mesh.visible = player.life === "alive";
+      }
     }
     for (const enemy of snapshot.enemies) {
       let target = this.enemyTargets.get(enemy.id);
@@ -135,6 +158,7 @@ export class GameRenderer {
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.resize);
     this.enemyVisual?.dispose();
+    this.playerVisual?.dispose();
     this.clutterVisuals?.dispose();
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh) {
@@ -172,7 +196,32 @@ export class GameRenderer {
 
   private async attachVisuals(): Promise<void> {
     await this.attachEnemies();
+    if (!this.disposed) await this.attachPlayers();
     if (!this.disposed) await this.attachClutter();
+  }
+
+  private async attachPlayers(): Promise<void> {
+    // Pre-allocate slots for a reasonable max player count
+    const maxPlayers = 6;
+    const visual = await loadPlayerVisual(maxPlayers);
+    if (this.disposed) {
+      visual.dispose();
+      return;
+    }
+    this.playerVisual = visual;
+    // Hide fallback capsule meshes now that splat visual is ready
+    for (const [playerId, mesh] of this.playerMeshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      materials.forEach((material) => material.dispose());
+      // Assign visual slot if not already assigned
+      if (!this.playerVisualSlots.has(playerId)) {
+        this.playerVisualSlots.set(playerId, this.nextPlayerSlot++);
+      }
+    }
+    this.playerMeshes.clear();
+    this.scene.add(visual.object);
   }
 
   private async attachClutter(): Promise<void> {
@@ -475,6 +524,27 @@ export class GameRenderer {
       if (!target) continue;
       mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, target.x, smoothing);
       mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, target.y, smoothing);
+    }
+    // Smooth interpolation for player splat visuals
+    if (this.playerVisual && this.targetSnapshot) {
+      for (const player of this.targetSnapshot.players) {
+        if (player.id === this.localPlayerId || player.life === "ghost") continue;
+        const target = this.playerTargets.get(player.id);
+        const position = this.playerPositions.get(player.id);
+        if (target && position) {
+          position.x = THREE.MathUtils.lerp(position.x, target.x, smoothing);
+          position.y = THREE.MathUtils.lerp(position.y, target.y, smoothing);
+        }
+        const slot = this.playerVisualSlots.get(player.id);
+        if (slot !== undefined && position) {
+          this.playerVisual.setPlayer(
+            slot,
+            { x: position.x, z: position.y },
+            player.yaw,
+            player.life === "alive",
+          );
+        }
+      }
     }
     if (this.enemyVisual && this.targetSnapshot) {
       this.targetSnapshot.enemies.forEach((enemy, index) => {

@@ -126,8 +126,7 @@ export class GameSimulation {
 
     const currentPlayers = [...this.players.values()];
     const living = currentPlayers.filter((player) => player.life === "alive");
-    const minimumLivingPlayers = this.soloDebug ? 1 : GAME_CONFIG.room.minPlayers;
-    if (living.length < minimumLivingPlayers) {
+    if (living.length === 0) {
       this.phase = "lost";
       return;
     }
